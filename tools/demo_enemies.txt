@@ -1,0 +1,34 @@
+# Combat demo: guns (Y), missiles (A), steering into waves, all three views
+120 rec v 1680 1
+130 hold Y
+330 hold Y,LEFT
+342 hold Y
+372 hold Y,RIGHT
+396 hold Y
+430 hold Y,A
+432 hold Y
+520 hold Y,B
+560 hold Y
+640 hold Y,A
+642 hold Y
+700 hold Y,R
+716 hold Y
+760 hold Y,L
+776 hold Y
+840 hold Y,A
+842 hold Y
+960 hold Y,LEFT
+975 hold Y
+1040 hold Y,A
+1042 hold Y
+1150 hold Y,X
+1152 hold Y
+1300 hold Y,X
+1302 hold Y
+1380 hold Y,A
+1382 hold Y
+1480 hold Y,RIGHT
+1500 hold Y
+1600 hold Y,A
+1602 hold Y
+1801 end

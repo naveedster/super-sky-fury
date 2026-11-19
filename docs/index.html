@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SUPER SKY FURY: play the SNES Mode 7 flight shooter in your browser</title>
+<meta name="description" content="SUPER SKY FURY is an original Mode 7 Super Nintendo flight shooter by Naveed Farbakhsh. Play it free in your browser with stereo sound, or download the ROM for real hardware and emulators.">
+<meta name="author" content="Naveed Farbakhsh">
+<meta name="theme-color" content="#0b0d26">
+<link rel="canonical" href="https://naveedster.github.io/super-sky-fury/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="SUPER SKY FURY: play it in your browser">
+<meta property="og:description" content="An original Mode 7 SNES flight shooter that runs on real hardware and emulators. Developed by Naveed Farbakhsh.">
+<meta property="og:url" content="https://naveedster.github.io/super-sky-fury/">
+<meta property="og:image" content="https://naveedster.github.io/super-sky-fury/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="SUPER SKY FURY: play it in your browser">
+<meta name="twitter:description" content="An original Mode 7 SNES flight shooter. Developed by Naveed Farbakhsh.">
+<meta name="twitter:image" content="https://naveedster.github.io/super-sky-fury/og.png">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✈️</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Russo+One&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b0d26;--bg2:#141845;--sky1:#2a2f7a;--sky2:#f08a3c;--gold:#ffd34e;--orange:#ff9a1f;--blue:#9cd0ff;--text:#e8ecff;--muted:#a9b1d6}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--blue)}
+.hero{position:relative;text-align:center;padding:42px 16px 28px;background:linear-gradient(180deg,#120f3a 0%,#3b2a7a 45%,#c0602e 85%,#f2a24a 100%);overflow:hidden}
+.hero:after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(0,0,0,.12) 0 2px,transparent 2px 4px);pointer-events:none}
+.banner{display:inline-block;font-family:"Russo One",sans-serif;font-size:clamp(20px,4vw,34px);color:#fff;background:#c4122f;padding:2px 26px;border:3px solid #ffe2a0;transform:skew(-8deg);letter-spacing:4px;box-shadow:0 4px 0 #5a0414}
+h1{margin:6px 0 0;font-family:"Russo One",sans-serif;font-style:italic;font-size:clamp(46px,11vw,112px);line-height:1;letter-spacing:2px;
+  background:linear-gradient(180deg,#e9f6ff 0%,#8fc4ff 45%,#ffe08a 55%,#ff8a1f 100%);-webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(4px 5px 0 #10102a) drop-shadow(0 0 2px #10102a)}
+.dev{font-family:"Press Start 2P",monospace;font-size:clamp(9px,1.8vw,13px);color:var(--gold);margin-top:16px;text-shadow:2px 2px 0 #2a1200;letter-spacing:1px}
+.pitch{max-width:720px;margin:18px auto 0;font-size:clamp(15px,2.2vw,18px);color:#fff;text-shadow:0 1px 2px #000}
+.btns{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:22px;position:relative;z-index:1}
+.btn{font-family:"Press Start 2P",monospace;font-size:12px;text-decoration:none;color:#1b0e00;background:var(--gold);padding:14px 18px;border:3px solid #fff3c4;box-shadow:0 5px 0 #8a5a00;border-radius:4px;display:inline-flex;gap:8px;align-items:center}
+.btn:active{transform:translateY(3px);box-shadow:0 2px 0 #8a5a00}
+.btn.alt{background:#1c2160;color:#fff;border-color:#6a78d8;box-shadow:0 5px 0 #070926}
+main{max-width:1040px;margin:0 auto;padding:28px 14px 60px}
+h2{font-family:"Press Start 2P",monospace;font-size:clamp(13px,2.4vw,18px);color:var(--gold);margin:44px 0 16px;text-shadow:3px 3px 0 #3a1d00}
+.console{background:linear-gradient(#2b2f56,#1a1d3d);border:4px solid #4a52a0;border-radius:14px;padding:12px;box-shadow:0 10px 30px rgba(0,0,0,.5),inset 0 0 0 2px #10122c}
+#game-wrap{position:relative;width:100%;aspect-ratio:8/7;max-height:80vh;margin:0 auto;background:#000;border-radius:6px;overflow:hidden}
+@media (max-width:700px){#game-wrap{aspect-ratio:auto;height:min(118vw,78vh)}}
+#game{width:100%;height:100%}
+#start{position:absolute;inset:0;border:0;padding:0;cursor:pointer;background:#000 url("screenshots/title_screen.png") center/contain no-repeat;image-rendering:pixelated;display:flex;align-items:flex-end;justify-content:center}
+#start span{font-family:"Press Start 2P",monospace;font-size:clamp(11px,2.4vw,16px);color:#fff;background:rgba(196,18,47,.92);border:3px solid #ffe2a0;padding:14px 20px;margin-bottom:9%;animation:blink 1.1s steps(2,start) infinite;box-shadow:0 5px 0 #5a0414}
+#start:hover span,#start:focus span{animation:none}
+@keyframes blink{50%{opacity:.35}}
+.note{font-size:13px;color:var(--muted);text-align:center;margin:10px 0 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.grid img{width:100%;display:block;border-radius:6px;border:3px solid #2c3270;image-rendering:pixelated;background:#000}
+table{width:100%;border-collapse:collapse;font-size:15px;background:var(--bg2);border-radius:8px;overflow:hidden}
+th,td{padding:9px 12px;border-bottom:1px solid #262c66;text-align:left;vertical-align:top}
+th{background:#1d2266;color:var(--gold);font-family:"Press Start 2P",monospace;font-size:10px;letter-spacing:1px}
+kbd{font-family:ui-monospace,Menlo,monospace;background:#0c0f30;border:1px solid #5560c0;border-bottom-width:3px;border-radius:4px;padding:1px 6px;font-size:13px;color:#fff;white-space:nowrap}
+.tw{overflow-x:auto}
+.feat{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;padding:0;list-style:none}
+.feat li{background:var(--bg2);border-left:4px solid var(--orange);padding:12px 14px;border-radius:6px}
+.feat b{color:#fff}
+footer{text-align:center;color:var(--muted);font-size:13px;padding:30px 14px 50px;border-top:1px solid #20255c}
+footer .dev{color:var(--gold)}
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="banner">SUPER</div>
+  <h1>SKY FURY</h1>
+  <div class="dev">DEVELOPED BY NAVEED FARBAKHSH</div>
+  <p class="pitch">An original Mode 7 jet-combat shooter for the Super Nintendo. Fly over an endless sea of islands, dogfight enemy waves, dodge heat-seeking missiles, and take down a giant robot boss, all with a wide stereo soundtrack. Play it right here, or download the ROM for real hardware.</p>
+  <div class="btns">
+    <a class="btn" href="#play">▶ PLAY NOW</a>
+    <a class="btn alt" href="rom/super_sky_fury.sfc" download="super_sky_fury.sfc">⬇ DOWNLOAD ROM</a>
+    <a class="btn alt" href="https://github.com/naveedster/super-sky-fury">★ GITHUB</a>
+  </div>
+</header>
+
+<main>
+  <h2 id="play">▶ PLAY</h2>
+  <div class="console">
+    <div id="game-wrap">
+      <div id="game"></div>
+      <button id="start" aria-label="Start the game with sound"><span>▶ CLICK TO START</span></button>
+    </div>
+  </div>
+  <p class="note">Runs the real ROM in the snes9x core (EmulatorJS). Headphones recommended, because the sound is mixed for wide stereo. On phones, on-screen controls appear automatically. Use the emulator menu (bottom bar) for fullscreen, volume, save states, and key remapping.</p>
+
+  <h2>🎮 CONTROLS</h2>
+  <div class="tw"><table>
+    <tr><th>ACTION</th><th>SNES</th><th>KEYBOARD</th><th>GAMEPAD (XBOX LAYOUT)</th></tr>
+    <tr><td>Open menu / pause</td><td>START</td><td><kbd>Enter</kbd></td><td>Menu / Start</td></tr>
+    <tr><td>Turn, climb, dive / menu cursor</td><td>D-pad</td><td><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></td><td>D-pad</td></tr>
+    <tr><td>Guns (hold)</td><td>Y</td><td><kbd>S</kbd></td><td>Y</td></tr>
+    <tr><td>Heat-seeking missile / menu confirm</td><td>A</td><td><kbd>Z</kbd></td><td>A</td></tr>
+    <tr><td>Afterburner / menu back</td><td>B</td><td><kbd>X</kbd></td><td>B</td></tr>
+    <tr><td>Hard bank left / right</td><td>L / R</td><td><kbd>Q</kbd> / <kbd>E</kbd></td><td>LB / RB</td></tr>
+    <tr><td>Change camera view</td><td>SELECT (or X)</td><td><kbd>V</kbd> (or <kbd>A</kbd>)</td><td>View / Back (or X)</td></tr>
+  </table></div>
+  <p class="note">Gamepad buttons map by letter (Xbox A = SNES A, and so on). Keys can be remapped in the emulator's Controls menu.</p>
+
+  <h2>🖼 SCREENSHOTS</h2>
+  <div class="grid">
+    <img src="screenshots/title_menu.png" alt="Title screen with START GAME, OPTIONS, CREDITS menu" loading="lazy" width="512" height="448">
+    <img src="screenshots/gameplay_chase.png" alt="Chase view over islands" loading="lazy" width="512" height="448">
+    <img src="screenshots/gameplay_boss.png" alt="Giant robot boss fight" loading="lazy" width="512" height="448">
+    <img src="screenshots/gameplay_cockpit.png" alt="Cockpit view with instruments" loading="lazy" width="512" height="448">
+    <img src="screenshots/gameplay_overhead.png" alt="Overhead view" loading="lazy" width="512" height="448">
+    <img src="screenshots/title_options.png" alt="Options: difficulty, stereo or mono, music and sound test" loading="lazy" width="512" height="448">
+  </div>
+
+  <h2>✦ FEATURES</h2>
+  <ul class="feat">
+    <li><b>Three camera views:</b> chase, cockpit with working instruments, and overhead, using per-scanline Mode 7 perspective.</li>
+    <li><b>Real combat:</b> twin cannons, lock-on missiles, an afterburner, hard banking, and enemies that shoot back.</li>
+    <li><b>Giant boss:</b> weak points, three attack phases, and its own theme.</li>
+    <li><b>Stereo sound:</b> an original 16-bit score with hard-panned, moving SFX on a custom SPC700 driver, plus a mono option.</li>
+    <li><b>Three difficulties:</b> EASY with 7 lives, NORMAL with 5, HARD with 3, each changing boss health and enemy fire rate.</li>
+    <li><b>Real hardware:</b> 60 fps, 512 KB LoROM/FastROM, no extra chips. Works on flash carts and accurate emulators.</li>
+  </ul>
+</main>
+
+<footer>
+  <div class="dev">DEVELOPED BY NAVEED FARBAKHSH</div>
+  <p>© 2026 Naveed Farbakhsh · <a href="https://github.com/naveedster/super-sky-fury">Source on GitHub</a> (MIT) · <a href="rom/super_sky_fury.sfc" download="super_sky_fury.sfc">Download ROM</a></p>
+  <p>In-browser emulation by <a href="https://emulatorjs.org/">EmulatorJS</a> (snes9x core). SUPER SKY FURY is an independent homebrew game and is not affiliated with Nintendo.</p>
+</footer>
+
+<script>
+(function(){
+  var started=false;
+  function boot(){
+    if(started) return; started=true;
+    var b=document.getElementById('start'); b.remove();
+    window.EJS_player='#game';
+    window.EJS_core='snes';
+    window.EJS_gameName='Super Sky Fury';
+    window.EJS_gameUrl='rom/super_sky_fury.sfc';
+    window.EJS_pathtodata='https://cdn.emulatorjs.org/stable/data/';
+    window.EJS_startOnLoaded=true;
+    window.EJS_color='#ff9a1f';
+    window.EJS_backgroundColor='#000000';
+    window.EJS_Buttons={netplay:false,cheat:false};
+    var s=document.createElement('script');
+    s.src='https://cdn.emulatorjs.org/stable/data/loader.js';
+    document.body.appendChild(s);
+  }
+  document.getElementById('start').addEventListener('click',boot);
+  if(location.hash==='#autostart') boot();
+})();
+</script>
+</body>
+</html>

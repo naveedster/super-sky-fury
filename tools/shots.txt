@@ -1,0 +1,24 @@
+# chase view
+120 shot chase_start
+120 hold RIGHT
+170 hold RIGHT,B
+200 shot chase_turn
+230 hold UP
+260 hold none
+296 shot chase_high
+300 hold SELECT
+302 hold none
+360 shot over_start
+360 hold LEFT,B
+420 shot over_turn
+440 hold none
+480 shot over_straight
+480 hold SELECT
+482 hold none
+540 shot cock_start
+540 hold RIGHT,DOWN
+600 shot cock_turn
+620 hold START
+622 hold none
+640 shot cock_paused
+641 end

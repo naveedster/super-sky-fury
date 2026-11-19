@@ -1,0 +1,35 @@
+# Scripted demo flight: used for screenshots + gameplay video
+0 rec frame 1500 1
+60 hold B
+100 hold RIGHT,B
+170 shot 01_chase_bank_boost
+200 hold none
+240 hold LEFT
+300 shot 02_chase_bank_left
+330 hold UP
+400 hold none
+420 shot 03_chase_high
+480 hold SELECT
+482 hold none
+520 hold RIGHT
+600 shot 04_overhead_turn
+640 hold B
+700 shot 05_overhead_boost
+740 hold DOWN,LEFT
+800 hold none
+830 shot 06_overhead_low
+900 hold SELECT
+902 hold none
+960 hold RIGHT
+1040 shot 07_cockpit_turn
+1100 hold LEFT,UP
+1180 shot 08_cockpit_climb
+1200 hold none
+1300 hold START
+1302 hold none
+1320 shot 09_cockpit_paused
+1360 hold START
+1362 hold SELECT
+1364 hold none
+1440 shot 10_chase_again
+1500 end

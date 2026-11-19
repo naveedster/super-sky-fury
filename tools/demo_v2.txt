@@ -1,0 +1,33 @@
+# Headphone demo for draft 2: boosts (afterburner whoosh), hard banks (wind swooshes), view changes
+0 rec frame 1980 1
+140 hold B
+190 hold RIGHT
+260 hold R
+330 hold none
+380 hold L
+450 hold LEFT,UP
+520 hold B
+560 hold none
+600 hold SELECT
+602 hold none
+660 hold R,B
+740 hold none
+800 hold L
+880 hold B
+920 hold none
+980 hold SELECT
+982 hold none
+1040 hold B,RIGHT
+1100 hold R
+1180 hold none
+1240 hold L,DOWN
+1320 hold none
+1380 hold SELECT
+1382 hold none
+1420 hold B
+1470 hold LEFT
+1540 hold L
+1620 hold R
+1700 hold B
+1760 hold none
+1980 end

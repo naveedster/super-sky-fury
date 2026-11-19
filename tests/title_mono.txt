@@ -1,0 +1,12 @@
+200 hold START
+204 hold none
+240 hold DOWN
+244 hold none
+260 hold A
+264 hold none
+290 hold DOWN
+294 hold none
+300 hold RIGHT
+304 hold none
+320 shot m_mono
+700 end
