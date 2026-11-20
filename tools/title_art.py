@@ -205,6 +205,41 @@ def to4bpp(t):
         out.append(sum(((int(t[y, x]) >> 2) & 1) << (7 - x) for x in range(8)))
         out.append(sum(((int(t[y, x]) >> 3) & 1) << (7 - x) for x in range(8)))
     return bytes(out)
+# ------------------------------------------------------------------ v1.5: the boss's silhouette looming behind the logo
+# (BG1 in the Mode 1 lines, priority 0 under the logo; rendered from the boss model, tools/boss_rt.py)
+import boss_rt
+_fr, _S = boss_rt.build_all()
+_img = boss_rt.compose(_fr, _S, 0, ("down", "down"))
+_ys, _xs = np.nonzero(_img)
+_img = _img[_ys.min():_ys.max() + 1, _xs.min():_xs.max() + 1]
+SIL_FULL = 150                               # px: the whole figure; its top 88 lines (head, shoulders) loom
+SIL_H = 88
+_sc = SIL_FULL / _img.shape[0]; SIL_W = int(round(_img.shape[1] * _sc)) & ~1
+_yi = np.minimum((np.arange(SIL_H) / _sc).astype(int), _img.shape[0] - 1)
+_xi = np.minimum((np.arange(SIL_W) / _sc).astype(int), _img.shape[1] - 1)
+_src = _img[np.ix_(_yi, _xi)]
+_m = _src > 0
+sil = np.where(_m, 15, 0).astype(np.uint8)                  # dark navy body
+_air = ~_m
+_edge = _m & (np.roll(_air, 1, 0) | np.roll(_air, 1, 1) | np.roll(_air, -1, 1))
+sil[_edge] = 3                                               # cold rim light (moon)
+_low = _m & (np.arange(SIL_H)[:, None] > SIL_H * 0.55) & (np.roll(_air, -1, 1) | np.roll(_air, 1, 1))
+sil[_low] = 13                                               # warm sunset rim on the lower flanks
+sil[_m & (_src == 13)] = 11                                  # eyes glow red
+sil[_m & (_src == 14)] = 12                                  # chest gem
+SIL_TOP = 88 - SIL_H
+_canvas = np.zeros((88, 256), np.uint8)
+_x0 = 128 - SIL_W // 2
+_canvas[SIL_TOP:88, _x0:_x0 + SIL_W] = sil
+boss_map = []
+for ty in range(11):
+    for tx in range(32):
+        t = _canvas[ty * 8:ty * 8 + 8, tx * 8:tx * 8 + 8]
+        if not t.any(): boss_map.append(0); continue
+        i, hf = add(t)
+        boss_map.append(mw(i, 3, hf, prio=0))
+print("title: boss silhouette", SIL_W, "x", SIL_H, "tiles now", len(tiles))
+assert len(tiles) <= 384, "title tiles overflow into the BG maps"
 open(os.path.join(OUT, "title_tiles.bin"), "wb").write(b"".join(to4bpp(t) for t in tiles))
 
 # ------------------------------------------------------------------ cursor jet (OBJ palette 0 = the player jet colours)
@@ -247,7 +282,7 @@ for c in grad:
     cg += [0, 0, c & 0xFF, c >> 8]
 cg += [0]
 md_title = [BAND0, 0x01, BAND1 - BAND0, 0x07, 1, 0x01, 0]
-tm_title = [BAND0, 0x02, BAND1 - BAND0, 0x11, 1, 0x12, 0]
+tm_title = [BAND0, 0x03, BAND1 - BAND0, 0x11, 1, 0x12, 0]   # v1.5: + BG1 (boss silhouette)
 md_page = [1, 0x01, 0]
 tm_page = [BAND0, 0x02, 1, 0x12, 0]
 
@@ -281,6 +316,9 @@ with open(os.path.join(OUT, "title.inc"), "w") as f:
     f.write(f"TITLE_NTILES = {len(tiles)}\nTF_PANEL = {PANEL_BASE}\nTF_SKY = {SKY_BASE}\nT_EDGE = {T_EDGE}\n"
             f"T_SOLID = {T_SOLID}\nCH_LT = {CHARS.index('<')}\nCH_GT = {CHARS.index('>')}\nTB_BAND0 = {BAND0}\nTB_BAND1 = {BAND1}\nLOGO_ROWS = {H // 8 + LOGO_ROW0}\n")
     f.write("TitlePal: .word " + ",".join(f"${bgr555(hexrgb(c)):04X}" for c in PALS) + "\n")
+    f.write("TitleBossMap:\n")
+    for i in range(0, len(boss_map), 16):
+        f.write("  .word " + ",".join(f"${x:04X}" for x in boss_map[i:i + 16]) + "\n")
     f.write("TitleLogoMap:\n")
     for i in range(0, len(logo_map), 16):
         f.write("  .word " + ",".join(f"${x:04X}" for x in logo_map[i:i + 16]) + "\n")

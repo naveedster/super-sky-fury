@@ -29,7 +29,7 @@ SNES emulator.
 * **Combat**: twin cannons, lock-on heat-seeking missiles, an afterburner, and hard banking.
   Enemies fire tracers and missiles, with on-screen warnings telling you how to dodge.
 * **Four stages**: OCEAN STRIKE, DESERT STORM, ARCTIC FRONT, and NIGHT RAID, each with its own
-  Mode 7 ground, sky, and haze, then the boss.
+  Mode 7 ground, animated sky (dawn, sunset, aurora, neon night), horizon band, and haze, then the boss.
 * **Enemy variety**: fighters in scripted formations, swoopers, fast darts, kamikazes, armoured
   bombers that smoke and shoot back, and a six-engine **sky fortress** mid-boss with its own health bar.
 * **Power-ups and combo**: SPREAD gun (P), RAPID missiles (M), and SHIELD (S) capsules, plus a kill
@@ -142,6 +142,26 @@ For the full test methodology and the hardware-safety rules the code follows, se
 [docs/TECHNICAL.md](docs/TECHNICAL.md).
 
 ## Changelog
+
+### v1.5 (2026-11-20): graphics push
+
+![v1.4 vs v1.5](docs/screenshots/before_after_v1_5.png)
+
+* **Glossy pre-rendered look**: the player jet, enemy planes, bombers, the sky fortress, and the larger ground
+  props are re-rendered with a shiny key light, a specular streak, a warm rim light on the back edges, and
+  dithered, quantized palettes.
+* **Per-stage skies and horizons**: an ocean dawn, a deep desert sunset, an arctic twilight with an aurora,
+  and a night city with neon palette cycling. Each sky gradient animates slowly (16 phases, streamed by
+  HDMA), and each stage has its own horizon band: islands, desert mesas, snowy ice peaks, and a city skyline
+  with lit windows.
+* **HDMA effects**: haze that thickens toward the horizon, a low sun on the dawn and sunset stages with a
+  glare that brightens as you turn toward it, and per-line heat shimmer over the desert.
+* **Colour math**: a soft shadow under your jet that follows your altitude, and a white-out when you fly
+  straight through a cloud.
+* **Title screen**: the boss looms in silhouette behind the logo, and a shine band sweeps across the logo.
+* **Performance**: chase view drops fewer frames than v1.3 and v1.4, even with the new effects. The contrail
+  OAM build is cached, and the Mode 7 vertical-scroll tables are built only for the desert shimmer (a fixed
+  ramp table is used elsewhere). See TECHNICAL.md.
 
 ### v1.4 (2026-11-20)
 

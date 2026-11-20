@@ -2691,6 +2691,7 @@ X_ViewLoad:
   sta MDMAEN
   A16
 @p:
+  jsl X15_Band               ; v1.5: this stage's horizon band (BG3)
   lda stage
   asl
   tax
@@ -2716,11 +2717,29 @@ X_ViewLoad:
   sta $4364
   sta $4374
   A16
-  lda x_t
+  lda stage                  ; v1.5: ch 7 haze = GlareTab[stage][0] (bank SKYB)
+  asl
+  asl
+  xba
+  sta stg_hz
+  lda stage
+  asl
+  asl
+  asl
+  asl
+  asl
+  asl
   clc
-  adc #512+2*SKYTAB_SZ
+  adc stg_hz
+  adc #.loword(GlareTab)
   sta stg_hz
   sta $4372
+  lda #$01
+  sta x15_cga
+  A8
+  lda #^GlareTab
+  sta $4374
+  A16
   lda view
   cmp #VIEW_COCK
   beq @ck

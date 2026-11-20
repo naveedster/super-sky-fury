@@ -1331,7 +1331,10 @@ FxCommit:
   bcc :+
   lda #5
 : asl
-  sta c_flash
+  cmp cl_fog                ; v1.5: flying through a cloud whites the picture out
+  bcs :+
+  lda cl_fog
+: sta c_flash
   rts
 
 ; ---------------------------------------------------------------- text rows (one 64-byte row DMA per frame)

@@ -129,6 +129,11 @@ int main(int argc, char **argv) {
       struct ev *e = &evs[i];
       if (!strcmp(e->cmd, "hold")) held = strcmp(e->a, "none") ? parse_buttons(e->a) : 0;
       else if (!strcmp(e->cmd, "rec")) { strcpy(rec_name, e->a); rec_start = fr; rec_until = fr + e->n * e->step; rec_step = e->step; rec_idx = 0; }
+      else if (!strcmp(e->cmd, "pk")) {
+        void *(*gm)(unsigned) = dlsym(h, "retro_get_memory_data"); unsigned char *rm = gm ? gm(RETRO_MEMORY_SYSTEM_RAM) : NULL;
+        const char *pk = getenv("PEEK"); static char b3[1024];
+        if (pk && rm) { strncpy(b3, pk, 1023); printf("pk %ld", fr); for (char *t = strtok(b3, ","); t; t = strtok(NULL, ",")) { unsigned a = strtoul(t, NULL, 16); printf(" %u", rm[a] | rm[a+1] << 8); } printf("\n"); fflush(stdout); }
+      }
       else if (!strcmp(e->cmd, "end")) {
         const char *wd = getenv("WRAMDUMP");
         if (wd) {

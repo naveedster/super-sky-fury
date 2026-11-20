@@ -32,6 +32,8 @@ tptr:     .res 4
 
 .segment "BSS"
 ti_on:    .res 2            ; 1 while the title runs (NMI branch)
+ti_bgo:   .res 12           ; v1.5: HDMA ch 3 BG1 scroll: 0 over the silhouette lines, Mode 7 values below
+ti_shn:   .res 24           ; v1.5: HDMA ch 7 logo shine band (COLDATA)
 ti_st:    .res 2            ; state
 ti_t:     .res 2            ; frames in state
 ti_fr:    .res 2            ; frame counter
@@ -229,6 +231,7 @@ TitleLoad:
   jsr LoadStatic            ; palette, Mode 7 world, registers
   DMA_VRAM TitleTiles, $4000, TITLE_NTILES*32, $80, $18, $01
   DMA_VRAM ZeroByte, $5800, 2048, $80, $18, $09     ; BG1 map for the Mode 1 lines: blank
+  DMA_VRAM TitleBossMap, $5800, 704, $80, $18, $01  ; v1.5: boss silhouette (rows 0-10)
   DMA_VRAM ObjOver, $6000, 16384, $80, $18, $01
   DMA_VRAM TitleCursor,     $6000+T_CURSOR*16,      128, $80, $18, $01
   DMA_VRAM (TitleCursor+128), $6000+T_CURSOR*16+256,  128, $80, $18, $01
@@ -255,7 +258,8 @@ TitleLoad:
   sta OBSEL                 ; 32x32 / 64x64, tiles at $6000
   stz TS
   stz CGWSEL
-  stz CGADSUB
+  lda #$02
+  sta CGADSUB               ; v1.5: BG2 + fixed colour (logo shine band, ch 7)
   stz M7SEL
   A16
   ; hide all sprites
@@ -278,7 +282,7 @@ TitleLoad:
   jsr DrawTitle
   jsr MapDma
   jsr TiHdma
-  lda #$0070
+  lda #$00F8                ; v1.5: + ch 3 (BG1 scroll split), ch 7 (shine)
   sta hdma_mask
   jsr TitleAnim
   jsr TiRegs
@@ -296,6 +300,8 @@ TiHdma:
   HDMA_DIRECT 4, $00, <TM, tm_page
 @c:
   HDMA_DIRECT 6, $03, <CGADD, cg_title
+  HDMA_DIRECT 3, $03, <BG1HOFS, ti_bgo
+  HDMA_DIRECT 7, $02, <COLDATA, ti_shn
   rts
 
 ; whole BG2 map -> VRAM $5C00 (call in vblank / force blank)
@@ -325,6 +331,55 @@ MapDma:
 
 ; Mode 7 matrix + scroll (also used once at load)
 TiRegs:
+  ; v1.5: BG1 scroll split (silhouette fixed, Mode 7 below line 88) + logo shine band
+  lda #88
+  sta ti_bgo
+  stz ti_bgo+1
+  stz ti_bgo+3
+  lda ti_hofs
+  sta ti_bgo+6
+  lda ti_vofs
+  sta ti_bgo+8
+  A8
+  lda #1
+  sta ti_bgo+5
+  stz ti_bgo+10
+  A16
+  lda nmi_count
+  and #$007F
+  sec
+  sbc #12
+  bpl :+
+  lda #100
+: cmp #84
+  bcc :+
+  lda #100
+: ldx ti_page
+  beq :+
+  lda #100
+: cmp #1
+  bcs :+
+  lda #1
+: A8
+  sta ti_shn
+  lda #$E0
+  sta ti_shn+1
+  sta ti_shn+2
+  lda #$88
+  sta ti_shn+3
+  ldx #0
+: lda f:ShineV,x
+  sta ti_shn+4,x
+  inx
+  cpx #16
+  bne :-
+  lda #1
+  sta ti_shn+20
+  lda #$E0
+  sta ti_shn+21
+  sta ti_shn+22
+  stz ti_shn+23
+  A16
   A8
   lda ti_m7x
   sta M7X
@@ -360,6 +415,8 @@ TiRegs:
   sta M7D
   A16
   rts
+
+ShineV: .byte $E3,$E3,$E7,$E7,$EB,$EB,$EE,$EE,$EE,$EE,$EA,$EA,$E6,$E6,$E2,$E2
 
 ; ---------------------------------------------------------------- NMI part (called from NmiFast, A16)
 TitleNmi:

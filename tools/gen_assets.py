@@ -301,15 +301,21 @@ import voxstack as vs
 import tumble_cfg
 TUMBLE_MODELS = vs.tumble_models()
 TUMBLE_FR = {k: tumble_cfg.tumble_frames(TUMBLE_MODELS, k) for k in tumble_cfg.TUMBLE}   # v1.2: 8 frames each
+# v1.5 DKC-style glossy lighting (key light + Blinn-Phong specular streak + warm back rim; voxstack.render)
+GLOSS_JET = dict(spec=1.4, shine=40, rim=1.1, hi=13, hi_t=0.5, rimc=14, rim_t=0.42, diff=0.9,
+                 matte=('dark', 'glow', 'canopy', 'glint', 'rnd_i', 'stripe', 'tip', 'rnd_o'))
+GLOSS_EN = dict(GLOSS_JET, matte=('dark', 'glow', 'canopy', 'glint', 'tip'))
+GLOSS_PROP = dict(spec=1.2, shine=30, rim=0.0, hi="top", hi_t=0.5,
+                  only=('hull', 'deck', 'steel', 'dish', 'metal', 'gun', 'pad', 'glass', 'ice', 'wallp'))
 VOX_JET = vs.voxelize(jet_polys(), 0.4, fill={"body": 0.9, "spine": 0.9, "canopy": 2.25, "radome": 0.9})
 VOX_EN = vs.voxelize(enemy_polys(), 0.4, fill={"body": 0.9, "spine": 0.9, "canopy": 2.2})
 render_jet_poly = render_jet; render_enemy_poly = render_enemy
 def render_jet(view, roll_deg, size, scale, pitch_deg=50, ss=4, nose=0.0):
     return vs.render(VOX_JET, JET_RAMPS, view, roll=roll_deg, pitch_cam=pitch_deg, size=size, scale=scale,
-                     oy=0 if view == "top" else -2, nose_pitch=nose)
+                     oy=0 if view == "top" else -2, nose_pitch=nose, gloss=GLOSS_JET)
 def render_enemy(view, roll_deg, yaw_deg, size, scale, pitch_deg=38, ss=4, outline=True):
     return vs.render(VOX_EN, EN_RAMPS, view, roll=roll_deg, yaw=yaw_deg, pitch_cam=pitch_deg, size=size, scale=scale,
-                     outline=1 if outline else 0, dither=size > 16)
+                     outline=1 if outline else 0, dither=size > 16, gloss=GLOSS_EN if size > 16 else {})
 
 def tiny(rows, size=16):
     """hand-drawn tiny sprite, centred in a size x size cell. rows: strings of palette digits/hex."""
@@ -504,13 +510,14 @@ def render_bomber_poly(size, scale, **kw):
 BOMB_FILL = {"body": 1.1, "spine": 1.1, "canopy": 2.3, "metal": 0.3}
 VOX_BOMB = vs.voxelize(bomber_polys(chord=1.4), 0.4, fill=BOMB_FILL)
 def render_bomber(size, scale, **kw):
-    return vs.render(VOX_BOMB, EN_RAMPS, "chase", yaw=180, pitch_cam=52, size=size, scale=scale, dither=size > 16)
+    return vs.render(VOX_BOMB, EN_RAMPS, "chase", yaw=180, pitch_cam=52, size=size, scale=scale, dither=size > 16,
+                     gloss=GLOSS_EN if size > 16 else {})
 
 def fortress_cells():
     """the mid-boss: a 96x32 six-engine sky fortress, cut into a centre cell and a left-wing cell
     (the right wing is the left one h-flipped)"""
     vf = vs.voxelize(bomber_polys(span=44.0, eng=(6.5, 17.0, 30.0), length=15.0, chord=2.2), 0.4, fill=BOMB_FILL)
-    big = vs.render(vf, EN_RAMPS, "chase", yaw=180, pitch_cam=56, size=96, scale=1.04)
+    big = vs.render(vf, EN_RAMPS, "chase", yaw=180, pitch_cam=56, size=96, scale=1.04, gloss=GLOSS_EN)
     ys = np.nonzero(big.any(axis=1))[0]; cy = (ys.min() + ys.max() + 1) // 2
     y0 = max(0, min(96 - 32, cy - 16)); band = big[y0:y0 + 32]
     left = band[:, 0:32].copy(); centre = band[:, 32:64].copy()
@@ -621,7 +628,7 @@ STAGE_PROPS = [["carrier", "palms", "oilrig", "bunker"], ["pyramid", "rocks", "r
 SLOT_WATER = [(0, 2), (0,)]          # per map: slots that stand on water (map B: sand / sea)
 def render_prop(t, yaw, size, scale, pc, outline=1):
     return vs.render(PROPS12[t], vs.PROP12_RAMPS, "chase", yaw=yaw, pitch_cam=pc, size=size, scale=scale * PROP12_SCALE.get(t, 1.4) / 1.4,
-                     oy=size / 2 - 3, dither=size > 16, flat_top=0.18, outline=outline)
+                     oy=size / 2 - 3, dither=size > 16, flat_top=0.18, outline=outline, gloss=GLOSS_PROP if size > 16 else {})
 PROP_NEAR = [[render_prop(t, d * 22.5, 32, 1.4, 30) for d in range(16)] for t in PROP12_LIST]
 PROP_MID = {t: (render_prop(t, 30, 16, 0.7, 22), render_prop(t, 30, 16, 0.36, 15, outline=0)) for t in PROP12_LIST}
 for i, t in enumerate(STAGE_PROPS[0]):
@@ -641,6 +648,16 @@ for k, g in enemy_frames_persp(include_away=False, include_bank=False).items():
     if k != "EM": sh.put(k, g)            # (chase medium enemies are the 8-direction EMY frames)
 for k, g in fx_frames().items(): sh.put(k, g)
 for k, g in v11_frames().items(): sh.put(k, g)
+# v1.5: the jet's ground shadow (left half of a 32 x 12 soft ellipse, h-flipped for the right half;
+# palette 4 = black, 50% ordered dither so the ground shows through)
+_jm = render_jet("top", 0, 32, 0.95) > 0              # planform silhouette, foreshortened 2:1 on the ground
+_jm = _jm.reshape(16, 2, 32).any(1)
+_sh = np.zeros((16, 16), np.uint8)
+for y_ in range(16):
+    for x_ in range(16):
+        if _jm[y_, x_] and ((x_ + y_) & 1 or (y_ & 1 and x_ & 2)):
+            _sh[y_, x_] = 1
+sh.put("SHADOW", _sh)
 emit_sheet("chase", sh)
 chase_sheet = sh
 # ---- v1.1 sprite-stack streaming data (ROM banks $8D / $8E, see src/v11.s X_Stream)
@@ -895,10 +912,11 @@ with open(f"{OUT}/boss.inc", "w") as fo:
     # v1.3 blue energy orbit tables: spin ring (16 angles, 96 x 20 px ellipse, 14 px below the gem) and the
     # beam charge swirl (16 radius levels x 32 angles); entries are sprite offsets (top-left) from the gem
     fo.write("SpinTab: .word " + ", ".join(f"${(round(96 * math.cos(2 * math.pi * i / 16)) - 8) & 0xFFFF:04X}, ${(round(20 * math.sin(2 * math.pi * i / 16)) + 6) & 0xFFFF:04X}" for i in range(16)) + "\n")
-    fo.write("SwirlTab:\n")
+    fo.write(".pushseg\n.segment \"BANK1\"\nSwirlTab:\n")    # v1.5: out of bank 0 (read with long addressing)
     for lv in range(16):
         r = (64 - 4 * lv) * 1.5 + 5
         fo.write("  .word " + ", ".join(f"${(round(r * math.cos(2 * math.pi * j / 32)) - 8) & 0xFFFF:04X}, ${(round(r * math.sin(2 * math.pi * j / 32)) - 8) & 0xFFFF:04X}" for j in range(32)) + "\n")
+    fo.write(".popseg\n")
     fo.write("BossPal: .word " + ",".join(f"${bgr(h):04X}" for h in boss_rt.PAL) + "\n")
     fo.write("NavyPal: .word " + ",".join(f"${bgr('#%02x%02x%02x' % c):04X}" for c in CGRAM[240:256]) + "\n")
 with open(f"{OUT}/boss_parts.inc", "w") as fo:
@@ -1281,6 +1299,91 @@ rows_ = b3map[BAND_ROW0 * 32:(BAND_ROW0 + 3) * 32] + b3map[1024 + BAND_ROW0 * 32
 open(f"{OUT}/map_bg3.bin", "wb").write(b"".join(struct.pack("<H", w) for w in rows_))
 symbols["BG3_ROWS_VRAM0"] = 0x5000 + BAND_ROW0 * 32; symbols["BG3_ROWS_VRAM1"] = 0x5400 + BAND_ROW0 * 32
 Image.fromarray(np.array([CGRAM[28 + i] if i else (90, 140, 220) for i in range(4)], np.uint8)[band]).resize((BW * 2, BH * 2), Image.NEAREST).save(f"{OUT}/preview_band.png")
+# v1.5: a distinct horizon band per stage (ocean islands + cumulus as above, desert mesas, arctic ice
+# peaks, night-city skyline with lit windows); uploaded with the stage palette (src/v11.s X_ViewLoad)
+def band_tiles(bd):
+    tl = [np.zeros((8, 8), np.uint8)]; ix = {tl[0].tobytes(): 0}; mp = [0] * (64 * 32)
+    for ty in range(BH // 8):
+        for tx in range(BW // 8):
+            t = bd[ty * 8:ty * 8 + 8, tx * 8:tx * 8 + 8]; hit = None
+            for hf in (0, 1):
+                for vf in (0, 1):
+                    v = t[:, ::-1] if hf else t
+                    v = v[::-1, :] if vf else v
+                    if v.tobytes() in ix and hit is None: hit = (ix[v.tobytes()], hf, vf)
+            if hit is None:
+                ix[t.tobytes()] = len(tl); tl.append(t.copy()); hit = (len(tl) - 1, 0, 0)
+            n, hf, vf = hit; scr, cx_ = divmod(tx, 32)
+            mp[scr * 1024 + (BAND_ROW0 + ty) * 32 + cx_] = (0x300 + n) | (7 << 10) | (hf << 14) | (vf << 15)
+    rows = mp[BAND_ROW0 * 32:(BAND_ROW0 + 3) * 32] + mp[1024 + BAND_ROW0 * 32:1024 + (BAND_ROW0 + 3) * 32]
+    return tl, rows
+def band_desert():
+    bd = np.zeros((BH, BW), np.uint8); r = np.random.default_rng(77)
+    h = np.zeros(BW)
+    for xx in range(BW):                                          # low rolling dunes on the horizon
+        h[xx] = 2.2 + 1.6 * math.sin(xx * 2 * math.pi / 128) + 0.9 * math.sin(xx * 2 * math.pi / 37 + 1.3)
+    cap = np.zeros(BW, bool)
+    x = 6
+    while x < BW - 10:                                            # buttes / mesas: caprock + talus slopes
+        w_ = int(r.integers(10, 40)); hg = float(r.integers(7, 19)); sl = r.uniform(0.5, 1.6)
+        for xx in range(x - 8, x + w_ + 8):
+            if not 0 <= xx < BW: continue
+            d = max(0, x - xx, xx - (x + w_))                      # outside the cap: talus falls off
+            v = hg - d * sl * (1 + 0.3 * math.sin(xx * 1.7)) if d else hg
+            if v > h[xx]: h[xx] = v; cap[xx] = d == 0
+        x += w_ + int(r.integers(14, 60))
+    for xx in range(BW):
+        top = int(round(BH - h[xx]))
+        if top >= BH: continue
+        bd[top:, xx] = 1
+        rising = h[(xx + 1) % BW] <= h[xx] + 0.01 and h[(xx - 1) % BW] < h[xx] - 0.3
+        west = h[(xx - 2) % BW] < h[xx] - 0.5
+        if west or (cap[xx] and not cap[(xx + 4) % BW]): bd[top:, xx] = 2          # sunlit west slopes
+        if cap[xx]:
+            bd[top, xx] = 3
+            if top + 1 < BH and bd[top + 1, xx] == 1: bd[top + 1, xx] = 2   # caprock lip
+    return bd
+def band_arctic():
+    bd = np.zeros((BH, BW), np.uint8); r = np.random.default_rng(91)
+    h = np.zeros(BW)
+    for k in range(26):
+        cx = r.uniform(0, BW); w_ = r.uniform(10, 42); hg = r.uniform(5, 21)
+        for xx in range(BW):
+            dx = min(abs(xx - cx), BW - abs(xx - cx)) / w_
+            if dx < 1: h[xx] = max(h[xx], hg * (1 - dx) ** 1.15)
+    hs = h
+    for xx in range(BW):
+        if hs[xx] < 1: continue
+        top = int(BH - hs[xx]); bd[top:, xx] = 1
+        if hs[(xx - 1) % BW] < hs[xx] - 0.05: bd[top:, xx] = 2          # sunlit west faces
+        snow = int(1.5 + hs[xx] * 0.32)
+        bd[top:min(BH, top + snow), xx] = 3
+    return bd
+def band_city():
+    bd = np.zeros((BH, BW), np.uint8); r = np.random.default_rng(5)
+    x = 0
+    while x < BW:
+        w_ = int(r.choice([8, 8, 16, 16, 24])); h_ = int(r.choice([6, 9, 11, 14, 17, 20, 22]))
+        top = BH - h_
+        bd[top:, x:x + w_] = 1
+        bd[top, x:x + w_] = 2
+        pat = int(r.integers(0, 3))
+        for yy in range(top + 2, BH - 1, 3):                      # window rows on an 8 px grid (dedupes)
+            for xx in range(x + 1, min(BW, x + w_) - 1, 2):
+                if (pat == 0 and (xx // 2 + yy // 3) % 3) or (pat == 1 and xx % 4 == 1) or (pat == 2 and (yy // 3) % 2):
+                    bd[yy, xx] = 3
+        if h_ >= 17 and r.random() < 0.6: bd[max(0, top - 4):top, x + w_ // 2] = 2   # antenna
+        x += w_
+    return bd
+BANDS = [band, band_desert(), band_arctic(), band_city()]
+band_bin = bytearray(); bandmap_bin = bytearray()
+for k, bd in enumerate(BANDS):
+    tl, rows = band_tiles(bd)
+    print(f"band {k}: {len(tl)} tiles")
+    assert len(tl) <= 128, (k, len(tl))
+    band_bin += b"".join(to2bpp(t) for t in tl).ljust(2048, b"\0")
+    bandmap_bin += b"".join(struct.pack("<H", w) for w in rows)
+open(f"{OUT}/bands.bin", "wb").write(band_bin); open(f"{OUT}/bandmaps.bin", "wb").write(bandmap_bin)
 
 open(f"{OUT}/palette.bin", "wb").write(b"".join(struct.pack("<H", bgr555(c)) for c in CGRAM))
 # text for pause
@@ -1377,7 +1480,8 @@ tabs["haze"] = bytes(hz)
 GN = {n: s_ for (n, _), s_ in zip(terrain.GROUND, terrain.SLOTS)}
 STAGES = [
   dict(name="OCEAN STRIKE", map=0, water="#1d4ea6", ground={}, band=None, cloud=(1.0, 1.0, 1.0),
-       sky=SKY_STOPS, haze=(0.8, 1.0, 1.0, 17)),
+       sky=[(0.0, "#1c3490"), (0.38, "#3c68c4"), (0.66, "#8a9cd4"), (0.84, "#e4aea8"), (0.95, "#ffcc94"), (1.0, "#fff0c8")],
+       haze=(1.0, 0.86, 0.80, 18), anim="dawn"),
   dict(name="DESERT STORM", map=1, water="#cfa062", ground=dict(
        deep3="#c08e52", deep="#cfa062", deep2="#dcb072", swell="#e6c084", crest="#f0d29c", fleck="#f8e4bc", white="#fff2d8",
        shal1="#c09058", shal2="#b07e4c", shal3="#9c6c42", shal4="#86593a", foam="#6e4830",
@@ -1388,8 +1492,8 @@ STAGES = [
        road1="#c0ae92", road2="#786a56", roof1="#d89868", roof2="#a86a44", roof3="#f2e2c8", roof4="#e4b070",
        dark="#3c2a1a", plaza="#e2d2b0"),
        band=["#000000", "#8a4e4a", "#d08066", "#ffd0a0"], cloud=(1.0, 0.8, 0.68),
-       sky=[(0.0, "#22306e"), (0.34, "#4c4c98"), (0.60, "#b46a86"), (0.80, "#ee965c"), (0.93, "#ffc066"), (1.0, "#ffe2a0")],
-       haze=(1.0, 0.62, 0.45, 22), pal6=["#5a3a1e", "#8a6034", "#c09050", "#ecc890", "#7a4a32", "#b0785a", "#ffe070", "#2a2018"]),
+       sky=[(0.0, "#1a2462"), (0.30, "#44438e"), (0.56, "#a85c84"), (0.76, "#ec8a56"), (0.90, "#ffb85c"), (1.0, "#fff0b0")],
+       haze=(1.0, 0.62, 0.45, 22), anim="heat", pal6=["#5a3a1e", "#8a6034", "#c09050", "#ecc890", "#7a4a32", "#b0785a", "#ffe070", "#2a2018"]),
   dict(name="ARCTIC FRONT", map=1, water="#143658", ground=dict(
        deep3="#0e2a46", deep="#143658", deep2="#1a4268", swell="#2a5a82", crest="#6c9ec2", fleck="#cce6f6", white="#ffffff",
        shal1="#3c7ca2", shal2="#5c9ec2", shal3="#8ec6de", shal4="#bae2f0", foam="#f0f8fc",
@@ -1400,8 +1504,8 @@ STAGES = [
        wheat1="#e8eef4", wheat2="#c8d4e0", soil1="#8c98a6", soil2="#6c7886", crop1="#dce6ee", crop2="#c2d0dc",
        road1="#8c949e", road2="#4c545e", roof3="#ffffff", dark="#1a2430", plaza="#d8e0e8"),
        band=["#000000", "#8ea8c4", "#cadaea", "#ffffff"], cloud=(0.94, 0.97, 1.0),
-       sky=[(0.0, "#46669a"), (0.40, "#7898c2"), (0.75, "#b8cce2"), (1.0, "#f2f8fc")],
-       haze=(0.9, 1.0, 1.0, 22), pal6=["#14301e", "#2a5a3a", "#4e8a5e", "#9ccaa8", "#8eb8d4", "#f0f8ff", "#ffe070", "#1a3a5a"]),
+       sky=[(0.0, "#0a1636"), (0.36, "#1c3664"), (0.62, "#4a6c9c"), (0.84, "#9cb6d6"), (1.0, "#eef6fc")],
+       haze=(0.9, 1.0, 1.0, 22), anim="aurora", pal6=["#14301e", "#2a5a3a", "#4e8a5e", "#9ccaa8", "#8eb8d4", "#f0f8ff", "#ffe070", "#1a3a5a"]),
   dict(name="NIGHT RAID", map=0, water="#040c1e", ground=dict(
        deep3="#020814", deep="#040c1e", deep2="#061428", swell="#0a1c36", crest="#1c3664", fleck="#4c70a6", white="#a4bce4",
        shal1="#08183a", shal2="#0c2246", shal3="#123052", shal4="#1c405e", foam="#3c5c7c",
@@ -1412,9 +1516,9 @@ STAGES = [
        wheat1="#201e16", wheat2="#1a1810", soil1="#16120e", soil2="#120e0a", crop1="#162216", crop2="#121c12",
        road1="#ffb444", road2="#a8661e", roof1="#ffe274", roof2="#c48434", roof3="#fff8d4", roof4="#ffa444",
        dark="#080808", plaza="#86643e", tarmac="#12161a", tarm2="#ff3a30"),
-       band=["#000000", "#0a1430", "#16244a", "#34446e"], cloud=(0.36, 0.42, 0.58),
+       band=["#000000", "#0a1026", "#202e5c", "#ffcf5a"], cloud=(0.36, 0.42, 0.58),
        sky=[(0.0, "#000004"), (0.48, "#040a20"), (0.78, "#0e1c46"), (0.92, "#2e2a5c"), (1.0, "#6a4258")],
-       haze=(0.2, 0.5, 0.5, 9), pal6=["#0c1208", "#18220e", "#263418", "#3a4a28", "#2c3038", "#464c58", "#ffe070", "#0a1428"],
+       haze=(0.2, 0.5, 0.5, 9), anim="neon", pal6=["#0c1208", "#18220e", "#263418", "#3a4a28", "#2c3038", "#464c58", "#ffe070", "#0a1428"],
        night=True),
 ]
 def sky_words(stops):
@@ -1471,14 +1575,14 @@ for st in STAGES:
 STAGE_SZ = 512 + 2 * SKYTAB_SZ + HAZE_SZ + OVER_SZ
 # v1.4: water shimmer. Per stage 8 phases of the wave-stroke and surf colours (the NMI writes one phase
 # every 8 frames): crests / flecks / whitecaps sparkle in a travelling wave, the surf line breathes.
-SHIM = ["swell", "crest", "fleck", "white", "foam", "shal4"]
+SHIM = ["swell", "crest", "fleck", "white", "foam", "shal4", "roof1", "roof4", "tarm2"]   # v1.5: + neon slots
 SHIM_AMP = [1.0, 0.0, 1.0, 0.7]            # desert dunes stay still
 def _lerp(a, b, f): return tuple(int(round(a[i] + (b[i] - a[i]) * f)) for i in range(3))
 shim_bin = bytearray()
 for si, st in enumerate(STAGES):
     cg = list(CGRAM)
     for n, c in st["ground"].items(): cg[GN[n]] = hexrgb(c)
-    col = {n: cg[GN[n]] for n in SHIM + ["deep2", "shal3"]}
+    col = {n: cg[GN[n]] for n in SHIM[:6] + ["deep2", "shal3"]}
     A = SHIM_AMP[si]
     for ph in range(8):
         w = [0.5 + 0.5 * math.sin(2 * math.pi * (ph / 8 + k / 4)) for k in range(4)]
@@ -1488,11 +1592,100 @@ for si, st in enumerate(STAGES):
                _lerp(col["white"], col["crest"], 0.75 * A * (1 - w[3])),
                _lerp(col["foam"], col["shal4"], 0.55 * A * (0.5 + 0.5 * math.sin(2 * math.pi * ph / 8))),
                _lerp(col["shal4"], col["foam"], 0.4 * A * (0.5 - 0.5 * math.sin(2 * math.pi * ph / 8)))]
+        if st.get("night"):      # v1.5: night-city neon palette cycling (signs, rooftops, runway lights)
+            NE = [hexrgb(c) for c in ("#ff4ad0", "#ff9a3a", "#ffe86a", "#5af0ff", "#4a8cff", "#c45aff")]
+            f8 = ph * len(NE) / 8; i0 = int(f8) % len(NE)
+            out += [_lerp(NE[i0], NE[(i0 + 1) % len(NE)], f8 - int(f8)),
+                    NE[(i0 + 3) % len(NE)],
+                    hexrgb("#ff3a30") if ph % 4 < 2 else hexrgb("#601410")]
+        else:
+            out += [cg[GN["roof1"]], cg[GN["roof4"]], cg[GN["tarm2"]]]
         for c in out: shim_bin += struct.pack("<H", bgr555(c))
 open(f"{OUT}/shim.bin", "wb").write(shim_bin)
+# v1.5: animated sky. 16 phases of the chase view's CGRAM sky table per stage (the NMI points HDMA ch 6 at
+# the next one every 4 frames: zero CPU). Smooth float gradients, error-diffused line to line (more apparent
+# colours than 5-bit steps), plus a per-stage effect: dawn sun glow, desert heat waver, arctic aurora
+# curtains, night-city neon glow pulsing on the horizon.
+SKYPH_N = 16; SKYPH_SZ = 0x120
+def sky_float(stops):
+    out = []
+    for y in range(64):
+        t = y / 63
+        for (t0, c0), (t1, c1) in zip(stops, stops[1:]):
+            if t0 <= t <= t1:
+                a_, b_ = hexrgb(c0), hexrgb(c1); f_ = (t - t0) / (t1 - t0); f_ = f_ * f_ * (3 - 2 * f_)
+                out.append(np.array([a_[i] + (b_[i] - a_[i]) * f_ for i in range(3)], float)); break
+    return np.array(out)
+def sky_fx(kind, ph):
+    a = 2 * math.pi * ph / SKYPH_N; d = np.zeros((64, 3))
+    for y in range(64):
+        t = y / 63
+        if kind == "dawn":       # sun glow on the horizon, breathing
+            g = math.exp(-((1 - t) / 0.10) ** 2) * (0.75 + 0.25 * math.sin(a))
+            d[y] = np.array([60, 34, 6]) * g
+        elif kind == "heat":     # heat waver: bright bands rising through the low sky
+            if t > 0.70:
+                w = math.sin(t * 46 - a * 2) * ((t - 0.70) / 0.30)
+                d[y] = np.array([22, 12, 2]) * w
+        elif kind == "aurora":   # curtains of green / teal with magenta tips, drifting
+            if 0.06 < t < 0.74:
+                e = math.sin(math.pi * (t - 0.06) / 0.68) ** 1.5
+                k = (0.5 + 0.5 * math.sin(t * 19 + a)) * (0.55 + 0.45 * math.sin(t * 7.3 - a * 2 + 1.1))
+                g = e * k
+                tip = max(0.0, 1 - t / 0.26)
+                d[y] = np.array([70 * tip + 10, 150 * (1 - 0.6 * tip), 70 + 40 * tip]) * g
+        elif kind == "neon":     # city glow: magenta <-> amber on the horizon
+            g = math.exp(-((1 - t) / 0.16) ** 2)
+            m = 0.5 + 0.5 * math.sin(a)
+            d[y] = (np.array([110, 20, 90]) * m + np.array([110, 60, 10]) * (1 - m)) * g * 0.8
+    return d
+def sky_words_ed(f):
+    out = []; err = np.zeros(3)
+    for y in range(64):
+        v = np.clip(f[y] + err, 0, 255)
+        q = np.clip(np.round(v / 8.225), 0, 31)       # 5 bit
+        err = (v - q * 8.225) * 0.9
+        out.append(int(q[0]) | (int(q[1]) << 5) | (int(q[2]) << 10))
+    return out
+skyph_bin = bytearray()
+for st in STAGES:
+    wt = bgr555(hexrgb(st["water"]))
+    base = sky_float(st["sky"])
+    for ph in range(SKYPH_N):
+        t1 = cg_tab(sky_words_ed(base + sky_fx(st.get("anim"), ph)), 64, [(136, wt), (1, STRIP)])
+        assert len(t1) <= SKYPH_SZ, len(t1)
+        skyph_bin += t1.ljust(SKYPH_SZ, b"\0")
+open(f"{OUT}/skyph.bin", "wb").write(skyph_bin)
+# v1.5: sun glare. Per stage 4 levels of the COLDATA (ch 7) table, sky lines included: level 0 = the plain
+# horizon haze; facing the low sun (dawn / sunset stages) the horizon blooms warm, above and below it.
+GL_SZ = 0x110
+def glare_tab(rk, gk, bk, amp, lvl, warm):
+    hz = bytearray(); hz.append(0x80 | 64)
+    for y in range(64):          # sky (BG2/BG3 + backdrop take the fixed colour in the chase view)
+        g = lvl / 3 * math.exp(-((63 - y) / 14.0) ** 2) * 15 if lvl else 0
+        r_ = int(g * warm[0]); gb = int(g * warm[1])
+        hz += bytes([0x20 | min(31, r_), 0xC0 | min(31, gb)])
+    hz.append(0x80 | 64)
+    for i in range(64):
+        v = (1 - i / 64) ** 1.7 * amp
+        g = lvl / 3 * math.exp(-(i / 18.0) ** 2) * 12 if lvl else 0
+        hz += bytes([0x20 | min(31, int(v * rk + g * warm[0])), 0xC0 | min(31, int(v * gk + g * warm[1]))])
+    hz.append(1); hz += bytes([0x20, 0xC0]); hz.append(0)
+    assert len(hz) <= GL_SZ
+    return bytes(hz).ljust(GL_SZ, b"\0")
+glare_bin = bytearray()
+for st in STAGES:
+    warm = (1.0, 0.62) if st.get("anim") == "dawn" else (1.0, 0.50)
+    for lvl in range(4): glare_bin += glare_tab(*st["haze"][:3], st["haze"][3], lvl, warm)
+open(f"{OUT}/glare.bin", "wb").write(glare_bin)
 with open(f"{OUT}/v14.inc", "w") as fo:
     fo.write("; generated by tools/gen_assets.py (v1.4)\n")
-    fo.write(f"NSHIM = {len(SHIM)}\n")
+    _ch = open(f"{OUT}/camh.bin", "rb").read()
+    _sy = []
+    for h_ in _ch:                    # v1.5 jet shadow: screen top y per altitude level (see v14.s X15_Shadow)
+        z_ = h_ + 40 - 17; _sy.append(min(255, 64 + (h_ * ((40960 + z_ // 2) // z_) >> 8) - 8))
+    fo.write("ShadowY: .byte " + ",".join(str(v) for v in _sy) + "\n")
+    fo.write(f"NSHIM = {len(SHIM)}\nSKYPH_N = {SKYPH_N}\nSKYPH_SZ = {SKYPH_SZ}\nGL_SZ = {GL_SZ}\n")
     for i, n in enumerate(SHIM): fo.write(f"SHIM_I{i} = {GN[n]}\n")
 open(f"{OUT}/stages.bin", "wb").write(stage_bin)
 with open(f"{OUT}/stages.inc", "w") as fo:

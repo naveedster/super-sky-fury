@@ -15,6 +15,7 @@ import math, os, sys
 import numpy as np
 
 LIGHT = np.array([-0.25, -0.30, 0.92]); LIGHT = LIGHT / np.linalg.norm(LIGHT)
+GLOSS = None        # v1.5: default glossy-lighting settings (set by gen_assets per object family)
 BAYER = np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]) / 16.0 - 0.5
 
 class Vox:
@@ -83,7 +84,7 @@ def voxelize(polys, res=0.4, fill=None, plate=0.5):
 
 def render(vox, ramps, view, roll=0.0, yaw=0.0, pitch_cam=38.0, size=32, scale=1.0, ss=4, outline=1, oy=0.0,
            nose_pitch=0.0, dither=True, flat_top=0.10, out_lam=False, light=None, seam=0.0, ox=0.0, keep_lit=(),
-           ambient=0.16, gamma=1.5, tumble=None, seam_groups=None, dither_amp=0.55, keep_mats=None):
+           ambient=0.16, gamma=1.5, tumble=None, seam_groups=None, dither_amp=0.55, keep_mats=None, gloss=None):
     """sprite-stack render to a size x size palette-index image.
     v1.2: light (model-space direction), seam (depth step in model units that draws an inner outline, so the
     parts of a model read like hand-drawn panels), ox/oy (pixel offset of the model origin from the centre),
@@ -112,6 +113,18 @@ def render(vox, ramps, view, roll=0.0, yaw=0.0, pitch_cam=38.0, size=32, scale=1
     lam = ambient + (1 - ambient) * np.clip(N @ L_, 0, 1)
     if view == "top": lam = 0.40 + 0.60 * np.abs(N @ L_)
     lam = lam + flat_top * vox.top                               # stacked-slice highlight on each layer's top
+    G_ = GLOSS if gloss is None else gloss
+    spc = np.zeros(len(lam)); rmv = np.zeros(len(lam))
+    if G_ and view != "top":
+        # v1.5 DKC-style glossy lighting: Blinn-Phong specular from the key light + a warm back rim light
+        H_ = L_ + cam; H_ = H_ / np.linalg.norm(H_)
+        ndc = np.clip(N @ cam, 0, 1)
+        spc = np.clip(N @ H_, 0, 1) ** G_.get("shine", 18) * G_.get("spec", 0.0)
+        RL = np.asarray(G_.get("rim_dir", (0.75, 0.55, 0.35)), float); RL = RL / np.linalg.norm(RL)
+        rmv = np.clip(N @ RL, 0, 1) * (1 - ndc) ** G_.get("rim_pow", 1.4) * G_.get("rim", 0.0)
+        nog = np.isin(vox.m, [i for i, n in enumerate(vox.mats) if n in G_.get("matte", ()) or ("only" in G_ and n not in G_["only"])])
+        spc[nog] = 0; rmv[nog] = 0
+        lam = lam * G_.get("diff", 1.0) + spc * 0.9 + rmv * 0.5
     lam = np.clip(lam, 0, 1)
     W = size * ss
     cx = (sx * scale + size / 2 + ox) * ss; cy = (sy * scale + size / 2 + oy) * ss
@@ -120,14 +133,19 @@ def render(vox, ramps, view, roll=0.0, yaw=0.0, pitch_cam=38.0, size=32, scale=1
     X = np.concatenate([np.floor(cx - r / 2 + dx).astype(int) for dx, dy in offs])
     Y = np.concatenate([np.floor(cy - r / 2 + dy).astype(int) for dx, dy in offs])
     D = np.tile(dep, len(offs)); M = np.tile(vox.m, len(offs)); Lm = np.tile(lam, len(offs))
+    Sp = np.tile(spc, len(offs)); Rm = np.tile(rmv, len(offs))
     ok = (X >= 0) & (X < W) & (Y >= 0) & (Y < W)
-    X, Y, D, M, Lm = X[ok], Y[ok], D[ok], M[ok], Lm[ok]
+    X, Y, D, M, Lm, Sp, Rm = X[ok], Y[ok], D[ok], M[ok], Lm[ok], Sp[ok], Rm[ok]
     pix = Y * W + X
     o = np.lexsort((D, pix))                                      # per pixel: nearest (largest depth) last
-    pix, M, Lm, D = pix[o], M[o], Lm[o], D[o]
+    pix, M, Lm, D, Sp, Rm = pix[o], M[o], Lm[o], D[o], Sp[o], Rm[o]
     last = np.r_[pix[1:] != pix[:-1], True]
     mbuf = np.zeros(W * W, np.int32); lbuf = np.zeros(W * W); dbuf = np.full(W * W, -1e9)
+    sbuf = np.zeros(W * W); rbuf = np.zeros(W * W)
     mbuf[pix[last]] = M[last]; lbuf[pix[last]] = Lm[last]; dbuf[pix[last]] = D[last]
+    sbuf[pix[last]] = Sp[last]; rbuf[pix[last]] = Rm[last]
+    sbuf = sbuf.reshape(size, ss, size, ss).transpose(0, 2, 1, 3).reshape(size, size, ss * ss)
+    rbuf = rbuf.reshape(size, ss, size, ss).transpose(0, 2, 1, 3).reshape(size, size, ss * ss)
     dbuf = dbuf.reshape(size, ss, size, ss).transpose(0, 2, 1, 3).reshape(size, size, ss * ss)
     mbuf = mbuf.reshape(size, ss, size, ss).transpose(0, 2, 1, 3).reshape(size, size, ss * ss)
     lbuf = lbuf.reshape(size, ss, size, ss).transpose(0, 2, 1, 3).reshape(size, size, ss * ss)
@@ -137,6 +155,8 @@ def render(vox, ramps, view, roll=0.0, yaw=0.0, pitch_cam=38.0, size=32, scale=1
     cnt = np.stack([(mbuf == k).sum(2) for k in range(nm)], 2); cnt[:, :, 0] = 0
     dom = cnt.argmax(2)
     lsum = (lbuf * (mbuf > 0)).sum(2) / np.maximum(cov, 1)
+    ssum = (sbuf * (mbuf > 0)).sum(2) / np.maximum(cov, 1)
+    rsum = (rbuf * (mbuf > 0)).sum(2) / np.maximum(cov, 1)
     dmax = dbuf.max(2)
     keep = (cov * 2 >= ss * ss) | ((cov >= 5) & (cov * 3 > ss * ss))
     for yy in range(size):
@@ -147,6 +167,11 @@ def render(vox, ramps, view, roll=0.0, yaw=0.0, pitch_cam=38.0, size=32, scale=1
             if isinstance(rp, (list, tuple)):
                 f = l ** gamma * len(rp) + (BAYER[yy % 4, xx % 4] * dither_amp if dither else 0)
                 out[yy, xx] = rp[min(len(rp) - 1, max(0, int(f)))]
+                if G_ and G_.get("hi") is not None and len(rp) >= 3 and ssum[yy, xx] > G_.get("hi_t", 0.5):
+                    out[yy, xx] = rp[-1] if G_["hi"] == "top" else G_["hi"]   # specular pop (white)
+                elif G_ and G_.get("rimc") is not None and len(rp) >= 3 and rsum[yy, xx] + BAYER[yy % 4, xx % 4] * 0.15 > G_.get("rim_t", 0.32):
+                    out[yy, xx] = G_["rimc"]                    # warm rim
+
             else:
                 out[yy, xx] = rp
     if seam_groups is not None and outline:

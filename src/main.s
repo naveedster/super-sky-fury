@@ -163,6 +163,11 @@ stile:     .res 2
 sattr:     .res 2
 sbig:      .res 2
 oam_idx:   .res 2
+ct_ok:     .res 2           ; v1.5 contrail OAM cache
+ct_n:      .res 2
+ct_o0:     .res 2
+ct_bad:    .res 2
+ct_fr:     .res 2
 bank_prev: .res 2        ; last bank frame (for the bank swoosh SFX)
 sfx_seq:   .res 2        ; SFX request counter sent to the APU on port 1
 src:       .res 2
@@ -1237,7 +1242,7 @@ NmiFast:
   sta M7D
   lda c_md+1
   sta M7D
-  bra @vram
+  jmp @vram
 @persp:
   A16
   lda #.loword(itab)
@@ -1248,6 +1253,53 @@ NmiFast:
   clc
   adc #ITSZ
   sta $4322
+  lda view                  ; v1.5: chase: BG1VOFS straight from a ROM ramp, 1 value per line
+  beq :+                    ; (indirect repeat entries; no per-frame value table)
+  jmp @oldv
+: lda stage
+  cmp #1
+  bne @rmp
+  lda #.loword(itab_d)      ; desert: the double-buffered shimmer table (ComputeVofs)
+  ldx c_bufv
+  beq :+
+  lda #.loword(itab_d)+80
+: sta $4332
+  bra @rmpb
+@rmp:
+  A8
+  lda #64                   ; 64 sky lines (value unused), 127 + 9 ground lines in repeat mode
+  sta itab_r
+  lda #$FF
+  sta itab_r+3
+  lda #$89
+  sta itab_r+6
+  stz itab_r+9
+  A16
+  lda #1024
+  sec
+  sbc c_m7y
+  and #$03FF
+  asl
+  clc
+  adc #.loword(RampTab)
+  sta itab_r+1
+  sta itab_r+4
+  clc
+  adc #254
+  sta itab_r+7
+  lda #.loword(itab_r)
+  sta $4332
+@rmpb:
+  A8
+  lda #^RampTab
+  sta $4337
+  A16
+  bra @vram
+@oldv:
+  A8
+  lda #$7E
+  sta $4337
+  A16
   lda #.loword(itab)+ITSZ*4
   ldx c_bufv
   beq :+
@@ -1380,10 +1432,10 @@ NmiFast:
   sta $4372
   bra @fdone
 @fp0:
-  lda stg_hz                 ; v1.1: this stage's haze
+  lda stg_hz                 ; v1.1: this stage's haze (v1.5: + sun glare)
   sta $4372
   A8
-  lda #$01
+  lda x15_cga
   sta CGADSUB
   A16
   bra @fdone
@@ -2273,28 +2325,94 @@ CT_Quad:
 
 ; per-entry BG1VOFS = Y0 + FOCAL - line  (written every frame into the back buffer)
 ComputeVofs:
-  lda front_v
+  ; v1.5: chase BG1VOFS comes from a ROM ramp (NmiFast @persp). Outside the desert that is one fixed
+  ; HDMA table; in the desert the 24 lines under the horizon get their own entries, each pointing a
+  ; wobbling step up/down the ramp (heat shimmer), double-buffered here.
+  lda stage
+  cmp #1
+  beq :+
+  rts
+: lda front_v
   eor #1
   sta front_v
   sta c_bufv
   ldx #0
   cmp #0
   beq :+
-  ldx #VSZ
-: lda c_m7y
+  ldx #80
+: lda itd_ok
+  bne @ok
+  jsr ItdInit
+@ok:
+  lda #1024
+  sec
+  sbc c_m7y
+  and #$03FF
+  asl
   clc
-  adc #FOCAL-HOR
-.repeat 32, I
-  sta hv+I*2,x
-  dec a
-.endrepeat
-.repeat NE_CH2, I
-  sta hv+64+I*2,x
-  dec a
-  dec a
+  adc #.loword(RampTab)
+  sta itab_d+1,x
+  sta tmpw
+  adc #48
+  sta itab_d+76,x
+.ifdef NOHEAT
+  lda #0
+  tay
+.else
+  lda nmi_count
+  lsr
+  and #7
+  asl
+  asl
+  asl
+  asl
+  sta t7
+  asl
+  adc t7                     ; * 48
+  tay
+.endif
+  lda tmpw
+.repeat 24, I
+  adc HeatWob+I*2,y          ; (carry clear: values stay far below $FFFF overflow... see note)
+  sta itab_d+4+I*3,x
+  sec
+  sbc HeatWob+I*2,y
+  clc
+  adc #2
 .endrepeat
   rts
-
+; note: the adds above can carry only at a 64 KB wrap, which the ramp (bank SKYB, < $F000) never reaches
+ItdInit:
+  phx
+  A8
+  ldx #0
+: lda #64
+  sta itab_d,x
+  lda #1
+.repeat 24, I
+  sta itab_d+3+I*3,x
+.endrepeat
+  lda #$80|112
+  sta itab_d+75,x
+  stz itab_d+78,x
+  cpx #80
+  beq :+
+  ldx #80
+  bra :-
+: A16
+  lda #1
+  sta itd_ok
+  plx
+  rts
+HeatWob:                     ; 8 phases x 24 lines (byte offsets into the ramp: 2 per line)
+  .word 0, 2, 2, 65534, 65534, 0, 2, 2, 65534, 65534, 0, 2, 0, 0, 65534, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  .word 65534, 2, 2, 0, 65534, 65534, 2, 2, 0, 65534, 65534, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  .word 65532, 0, 2, 2, 0, 65534, 0, 2, 2, 0, 65534, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  .word 65534, 65534, 0, 2, 2, 65534, 65534, 0, 2, 0, 65534, 65534, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  .word 0, 65534, 65534, 2, 2, 0, 65534, 65534, 2, 2, 0, 65534, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  .word 2, 65534, 65534, 0, 2, 2, 65534, 65534, 0, 2, 2, 0, 65534, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  .word 4, 0, 65534, 65534, 0, 2, 0, 65534, 65534, 0, 2, 0, 65534, 65534, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  .word 2, 2, 0, 65534, 65534, 2, 2, 0, 65534, 0, 2, 2, 0, 65534, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 
 ; cockpit: only its 88 ground lines (NE_CK entries) are used by the HDMA table
 ComputeVofsCk:
@@ -2659,6 +2777,11 @@ ProjectClouds:
   sec
   sbc cloud_h,y
   sta t4                    ; height difference (camera - cloud)
+  lda t2                    ; v1.5: flying through a cloud -> whiteout
+  cmp #64
+  bcs :+
+  jsl X15_Fog
+:
   lda t2
   asl
   tax
@@ -2991,6 +3114,7 @@ BuildChase:
   sta sattr
   jsr PutSpr
 @nofl:
+  jsl X15_Shadow             ; v1.5: the jet's ground shadow
   lda mf_t                   ; v1.4: muzzle flash, charge glow
   ora ch_t
   beq :+
@@ -3004,6 +3128,7 @@ BuildChase:
   jsr EmitBack
   CHK 40
   jsr BossDraw
+  jsl X15_Sun                ; v1.5: low sun + lens flare (dawn / sunset stages)
   CHK 4
   jsr PerspCommon
   CHK 20
@@ -3011,6 +3136,65 @@ BuildChase:
 
 ; wingtip contrails: 2 x 7 dots trailing toward the camera
 ChaseTrails:
+  ; v1.5: the 14 dots are fully computed every other frame; in between the cached OAM bytes are
+  ; block-copied (saves ~5 lines a frame on average)
+  lda ct_ok
+  beq @full
+  stz ct_ok
+  lda frame
+  sec
+  sbc ct_fr
+  cmp #2
+  bcs @full
+  lda oam_idx
+  cmp #512-56+1
+  bcs @full
+  clc
+  adc #.loword(oam_lo)
+  tay
+  ldx #.loword(ct_buf)
+  lda ct_n
+  dec a
+  phb
+  mvn #$7E, #$7E
+  plb
+  lda oam_idx
+  clc
+  adc ct_n
+  sta oam_idx
+  rts
+@full:
+  lda oam_idx
+  sta ct_o0
+  stz ct_bad
+  jsr CtFull
+  lda ct_bad
+  bne @nc
+  lda oam_idx
+  sec
+  sbc ct_o0
+  beq @nc
+  sta ct_n
+  lda ct_o0
+  clc
+  adc #.loword(oam_lo)
+  tax
+  ldy #.loword(ct_buf)
+  lda ct_n
+  dec a
+  phb
+  mvn #$7E, #$7E
+  plb
+  lda #1
+  sta ct_ok
+  lda frame
+  sta ct_fr
+@nc:
+  rts
+CtSlow:
+  inc ct_bad
+  jmp PutSpr
+CtFull:
   lda js_want               ; v1.1: wingtips of the streamed jet frame
   asl
   asl
@@ -3117,7 +3301,7 @@ ChaseTrails:
   lda sx                     ; (inline PutDot)
   cmp #256
   bcc :+
-  jsr PutSpr
+  jsr CtSlow
   bra :++
 : ldx oam_idx
   cpx #512
@@ -3150,7 +3334,7 @@ ChaseTrails:
   lda sx                     ; (inline PutDot)
   cmp #256
   bcc :+
-  jsr PutSpr
+  jsr CtSlow
   bra :++
 : ldx oam_idx
   cpx #512
@@ -4088,7 +4272,7 @@ MapCock:  .incbin "../assets/map_cock.bin"
   .byte $00                       ; no SRAM
   .byte $01                       ; North America
   .byte $00                       ; developer
-  .byte $04                       ; version (v1.4)
+  .byte $05                       ; version (v1.5)
   .word $FFFF                     ; checksum complement (fixed by build)
   .word $0000                     ; checksum
 

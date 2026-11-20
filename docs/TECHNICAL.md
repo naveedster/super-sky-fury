@@ -9,6 +9,64 @@ that name. The public overview is in the [README](../README.md).
 > They are excluded by `.gitignore` and are not in the repository. The release ROM is
 > `dist/super_sky_fury.sfc`. Current music renders are `music/{title,stage,boss,boss_victory}.{mp3,spc}`.
 
+## v1.5: graphics push (stock SNES, no enhancement chip)
+
+* **Frame budget first.** `ChaseTrails` now caches its OAM output (`ct_buf`): it does a full build every
+  other frame and copies the cached entries with `mvn` in between, as long as the cache is less than 2
+  frames old. The chase Mode 7 vertical scroll (HDMA ch3, BG1VOFS) no longer rebuilds a per-line table
+  each frame. Outside the desert, NMI points an indirect HDMA table (`itab_r`, 10 bytes) at a fixed ramp
+  (`RampTab` in bank 23, `(1120-i) & $FFFF`). The desert uses a double-buffered `itab_d` that points into
+  the same ramp, with 24 wobble entries from `HeatWob` (8 phases) for the heat shimmer. The jet shadow is
+  written straight into OAM from a per-altitude `ShadowY` table, with no projection.
+* **Gloss pass.** `tools/voxstack.py` `render(gloss=...)` adds Blinn-Phong specular toward a fixed key
+  light, a warm back-rim term, and per-material masks (only metal and paint get a highlight). It is applied
+  to the jet (`GLOSS_JET`), the enemies, the bomber, the fortress (`GLOSS_EN`), and props larger than 16 px
+  (`GLOSS_PROP`). Palettes are unchanged in size: the highlight reuses each ramp's top index, and the rim
+  reuses a warm index.
+* **Skies.** Each stage has 16 sky phases (`SkyPh`, $120 bytes each: smoothstep gradients, error-diffused
+  to 5 bits). Every 4 frames, NMI repoints the CGRAM HDMA (ch6) at the current phase. The kinds are dawn
+  (ocean), heat (desert sunset), aurora (arctic), and neon (night). The night water shimmer table also
+  cycles neon colours.
+* **Horizon bands.** BG3 gets a per-stage 2 KB tile set plus two 192-entry maps (`BANDB`, bank 24),
+  DMA'd by `X15_Band` when the stage changes: islands (121 tiles), mesas with caprock and lit west slopes
+  (99), snow-capped ice peaks (106), and a city skyline with lit windows (49).
+* **Haze and glare.** The COLDATA HDMA (ch7) reads `GlareTab` (bank 23, $110 bytes per stage and level):
+  haze that thickens toward the horizon, plus 4 glare levels. On the dawn and sunset stages, `X15_Sun`
+  places a sun sprite at a fixed bearing on the horizon and picks the glare level from how close it is to
+  screen centre. Colour math is now applied to BG1-4 and the backdrop in chase (`x15_cga` = $2F) so the
+  glare also lights the sky.
+* **Cloud white-out.** `X15_Fog` (chase only) flags a cloud right on the jet (depth 22-43, lateral < 16,
+  height within 18). `FxCommit` takes the larger of the hit flash and the fog level, so the picture whites
+  out through the existing flash constant and fades over about 10 frames.
+* **Title.** A boss silhouette (from `boss_rt.py`, 94x88, BG2 palette 3, behind the logo) and a shine band
+  on the logo (HDMA ch3 BG1HOFS and ch7 COLDATA, moving 1 line per frame). The title uses 367 of 384 tiles.
+* **Layout.** `SwirlTab` moved to BANK1 (bank 0 was full in PROFX builds). New segments: `SKYB` (ROM23)
+  and `BANDB` (ROM24). The chase sprite sheet has 0 free tiles (the shadow tile used the last one).
+
+**Performance** (same method as v1.4: RING builds, `rcm.sh` K=6 with SELECT for view, `NORANK`;
+`bossbench.sh` K=4 for the boss, all three builds measured the same way).
+
+| Run | v1.3 | v1.4 | v1.5 |
+|---|---|---|---|
+| sa0 chase: frames over 262 | 124 | 196 | 101 |
+| sa0 chase: mean lines | 187.0 | 188.6 | 183.3 |
+| sa1 overhead: frames over 262 | 15 | 15 | 15 |
+| sa2 cockpit: frames over 262 | 1 | 2 | 5 |
+| boss: frames over 262 (K=4) | 5 | 6 | 2 |
+| boss: mean lines | 139.4 | 138.5 | 133.9 |
+
+Each stage run is about 32,300 frames. Chase now drops 0.31% of frames (v1.3 0.38%, v1.4 0.61%).
+Cockpit drops 3 more frames than v1.4 (out of 32,000).
+
+**Verification.** The release ROM's `tools/dev/boss_win_rel.txt` replay reaches MISSION COMPLETE on
+snes9x, snes9x 1.55 (Delta), and Mesen-S. Full run: an AUTOPILOT build played from the title by the
+harness bot clears all four stages and beats the boss (MISSION COMPLETE around frame 10,200 to 11,000) on
+all three cores, then loops to stage 1. A 4-core smoke test (`cores.sh`, including bsnes) runs clean.
+
+**Not done.** A curved horizon, lens-flare ghosts (tried, then dropped for cost), true translucent clouds
+(the cloud pass is a white-out, not per-pixel transparency), enemy ground shadows, and a mid-screen palette
+split.
+
 ## v1.4: barrel roll, charge shot, graze, ranks, ground-target fix, effects
 
 All new code is in `src/v14.s` (bank $8C XCODE, plus a few bank-0 trampolines). It is hooked from

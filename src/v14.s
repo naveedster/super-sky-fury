@@ -25,6 +25,10 @@ SC_LIFE  = 240
 .include "../assets/v14.inc"
 
 .segment "BSS"
+itab_r:    .res 10
+itab_d:    .res 160         ; v1.5 desert shimmer tables (2 x 79 bytes, stride 80)
+itd_ok:    .res 2          ; v1.5 ch 3 ramp table: sky entry, 127 + 9 ground lines
+ct_buf:    .res 56          ; v1.5 contrail OAM cache (main.s ChaseTrails)
 roll_t:  .res 2
 roll_d:  .res 2
 roll_cd: .res 2
@@ -59,6 +63,16 @@ pn_x:    .res PR_MAX*2
 pc_x:    .res PR_MAX*2
 x14_a:   .res 2
 x14_b:   .res 2
+nm15:    .res 2           ; v1.5 NMI scratch
+x15_sx:  .res 2
+x15_dx:  .res 2
+x15_f:   .res 2
+x15_i:   .res 2
+x15_lv:  .res 2
+x15_cga: .res 2
+cl_fog:  .res 2
+cur_band: .res 2
+nm15b:   .res 2
 x14_i:   .res 2
 x14_k:   .res 2
 x14_p:   .res 2
@@ -1035,28 +1049,330 @@ X14_JetFrame:
   rtl
 
 ; ---------------------------------------------------------------- NMI: water shimmer (6 colours)
+; ---------------------------------------------------------------- v1.5: the jet's shadow on the ground
+; the sun is behind / above (45 deg): the shadow falls ahead of the jet, alt px further out, so it is on
+; screen at every altitude and shrinks / rises toward the horizon as you climb
+; ---------------------------------------------------------------- v1.5: per-stage horizon band (force blank)
+X15_Band:
+  lda view
+  cmp #VIEW_OVER
+  bne :+
+  rtl
+: lda stage
+  cmp cur_band
+  bne :+
+  rtl
+: sta cur_band
+  xba
+  asl
+  asl
+  asl                        ; * 2048
+  clc
+  adc #.loword(BandTiles)
+  sta x15_f
+  A8
+  lda #$80
+  sta VMAIN
+  lda #$01
+  sta DMAP0
+  lda #$18
+  sta BBAD0
+  lda #^BandTiles
+  sta A1B0
+  A16
+  lda #$5800
+  sta VMADDL
+  lda x15_f
+  sta A1T0L
+  lda #2048
+  sta DAS0L
+  A8
+  lda #1
+  sta MDMAEN
+  A16
+  lda cur_band               ; maps: 384 bytes per stage = 2 x 192
+  asl
+  asl
+  asl
+  asl
+  asl
+  asl
+  asl                        ; * 128
+  sta x15_f
+  asl                        ; * 256
+  clc
+  adc x15_f                  ; * 384
+  adc #.loword(BandMaps)
+  sta x15_f
+  lda #BG3_ROWS_VRAM0
+  sta VMADDL
+  lda x15_f
+  sta A1T0L
+  lda #192
+  sta DAS0L
+  A8
+  lda #^BandMaps
+  sta A1B0
+  lda #1
+  sta MDMAEN
+  A16
+  lda #BG3_ROWS_VRAM1
+  sta VMADDL
+  lda x15_f
+  clc
+  adc #192
+  sta A1T0L
+  lda #192
+  sta DAS0L
+  A8
+  lda #1
+  sta MDMAEN
+  A16
+@r:
+  rtl
+
+X15_Shadow:
+.ifdef NOSHADOW
+  rtl
+.endif
+  lda b_gfx                  ; (the boss sheet has no shadow tile)
+  bne @r
+  ldx lev
+  lda f:ShadowY,x            ; precomputed ground-point projection per altitude level
+  and #$00FF
+  cmp #202
+  bcs @r
+  ldx oam_idx
+  cpx #512-8+1
+  bcs @r
+  A8
+  sta oam_lo+1,x
+  sta oam_lo+5,x
+  lda #112
+  clc
+  adc c_shk
+  sta oam_lo,x
+  adc #16
+  sta oam_lo+4,x
+  lda #<T_CHASE_SHADOW
+  sta oam_lo+2,x
+  sta oam_lo+6,x
+  lda #$38 | >T_CHASE_SHADOW  ; palette 4 (black), priority 3
+  sta oam_lo+3,x
+  lda #$78 | >T_CHASE_SHADOW  ; h-flipped right half
+  sta oam_lo+7,x
+  A16
+  txa
+  clc
+  adc #8
+  sta oam_idx
+@r:
+  rtl
+
+; ---------------------------------------------------------------- v1.5: cloud whiteout + low sun glare
+; X15_Fog: a cloud right on the jet whites the picture out (via the flash colour constant, see FxCommit)
+; t2 = cloud depth (< 64), t3 = lateral, t4 = camera - cloud height (the jet is 17 below the camera)
+X15_Fog:
+.ifdef NOFOG
+  rtl
+.endif
+.ifndef FOGALL
+  lda view                   ; chase view only (the jet sits 17 below the camera there)
+  bne @r
+.endif
+  lda t2
+  cmp #22
+  bcc @r
+  cmp #44
+  bcs @r
+  lda t3
+  bpl :+
+  eor #$FFFF
+  inc a
+: cmp #16
+  bcs @r
+  lda t4
+  sec
+  sbc #17
+  bpl :+
+  eor #$FFFF
+  inc a
+: cmp #18
+  bcs @r
+  lda #11
+  sta cl_fog
+@r:
+  rtl
+
+X15_Sun:
+.ifdef NOSUN
+  rtl
+.endif
+  lda cl_fog                 ; cloud whiteout, fading out (rides the flash colour constant)
+  beq @nf
+  dec cl_fog
+@nf:
+  lda #$2F                   ; colour math on BG1-4 + backdrop (the glare tables light the sky too)
+  sta x15_cga
+  stz x15_lv
+  lda b_gfx
+  bne @hz
+  lda stage
+  cmp #2
+  bcs @hz                    ; ocean dawn + desert sunset only
+  asl
+  tax
+  lda f:SunAz,x
+  sec
+  sbc c_b3h
+  and #1023
+  cmp #512
+  bcc :+
+  ora #$FC00
+: clc
+  adc #128
+  sta x15_sx                 ; sun centre x
+  clc
+  adc #16
+  cmp #288
+  bcs @hz                    ; off screen
+  lda x15_sx
+  sec
+  sbc #8
+  sta sx
+  lda #SUN_Y-8
+  sta sy
+  stz sbig
+  lda #T_CHASE_X16A
+  sta stile
+  lda #$20                   ; palette 0, priority 2 (in front of the horizon band)
+  sta sattr
+  jsl T_PutSpr
+  lda x15_sx                 ; glare level by how close to straight ahead
+  sec
+  sbc #128
+  bpl :+
+  eor #$FFFF
+  inc a
+: ldx #3
+  cmp #36
+  bcc @lv
+  dex
+  cmp #76
+  bcc @lv
+  dex
+  cmp #124
+  bcc @lv
+  dex
+@lv:
+  stx x15_lv
+@hz:
+  lda stage                  ; ch 7 table = GlareTab[stage][level]
+  asl
+  asl
+  ora x15_lv
+  sta x15_f
+  xba                        ; * 256
+  sta x15_i
+  lda x15_f
+  asl
+  asl
+  asl
+  asl                        ; * 16  (GL_SZ = $110)
+  clc
+  adc x15_i
+  adc #.loword(GlareTab)
+  sta stg_hz
+  rtl
+.assert GL_SZ = $110, error, "glare size"
+SUN_Y = 40
+SunAz:  .word 96, 900
+
+; A = signed value (|A| < 256), x15_f = factor * 16 (< 256) -> A = A * f / 16
+T_MulB16:
+  cmp #$8000
+  php
+  bcc :+
+  eor #$FFFF
+  inc a
+: A8
+  sta WRMPYA
+  lda x15_f
+  sta WRMPYB
+  nop
+  nop
+  nop
+  nop
+  A16
+  lda RDMPYL
+  lsr
+  lsr
+  lsr
+  lsr
+  plp
+  bcc :+
+  eor #$FFFF
+  inc a
+: rtl
+
 X14_Nmi:
   .ifdef NONMI
   rtl
   .endif
+  lda view                   ; v1.5: animated sky (chase): HDMA ch 6 -> next phase table every 4 frames
+  bne @nsk
+  lda nmi_count
+  and #3
+  bne @nsk
+  lda nmi_count
+  lsr
+  lsr
+  and #SKYPH_N-1
+  sta nm15
+  lda stage
+  asl
+  asl
+  asl
+  asl
+  ora nm15                   ; stage * 16 + phase
+  sta nm15
+  asl
+  asl
+  asl
+  asl
+  asl
+  sta nm15b                  ; * 32
+  lda nm15
+  xba                        ; * 256
+  clc
+  adc nm15b
+  adc #.loword(SkyPh)        ; (SKYPH_SZ = $120)
+.assert SKYPH_SZ = $120, error, "sky phase size"
+  sta $4362
+  A8
+  lda #^SkyPh
+  sta $4364
+  A16
+@nsk:
   lda sw_req
   bne :+
   rtl
 : dec a
   stz sw_req
-  sta x14_b
+  sta nm15
   lda stage
   asl
   asl
   asl
   clc
-  adc x14_b                  ; stage * 8 + phase
+  adc nm15                  ; stage * 8 + phase
+  asl
+  sta nm15                  ; * 2
   asl
   asl
-  sta x14_b                  ; * 4
   asl
   clc
-  adc x14_b                  ; * 12
+  adc nm15                  ; * 18 (v1.5: 9 slots)
   tax
   A8
 .repeat NSHIM, I
@@ -1305,6 +1621,18 @@ RollSX: .word 4,12,19,25,30,33,34,33,30,25,19,12,4,.loword(-4),.loword(-12),.low
 RollSZ: .word 30,28,25,20,14,7,0,.loword(-7),.loword(-14),.loword(-20),.loword(-25),.loword(-28),.loword(-30),.loword(-30)
         .word .loword(-28),.loword(-25),.loword(-20),.loword(-14),.loword(-7),0,7,14,20,25,28,30
 ShimTab: .incbin "../assets/shim.bin"
+.pushseg
+.segment "SKYB"
+SkyPh: .incbin "../assets/skyph.bin"     ; v1.5: 4 stages x 16 animated sky tables
+GlareTab: .incbin "../assets/glare.bin"
+.segment "BANDB"
+BandTiles: .incbin "../assets/bands.bin"   ; v1.5: 4 stages x 2 KB BG3 band tiles
+BandMaps:  .incbin "../assets/bandmaps.bin"
+RampTab:                                 ; v1.5: BG1VOFS ramp, RampTab[j] = 1120 - j
+.repeat 1168, I
+  .word (1120 - I) & $FFFF
+.endrepeat  ; v1.5: 4 stages x 4 sun-glare levels of the haze table
+.popseg
 RingTab:
   .byte .lobyte(6),.lobyte(0),.lobyte(3),.lobyte(3),.lobyte(-3),.lobyte(3),.lobyte(-6),.lobyte(0),.lobyte(-3),.lobyte(-3),.lobyte(3),.lobyte(-3),.lobyte(9),.lobyte(0),.lobyte(4),.lobyte(5),.lobyte(-5),.lobyte(5),.lobyte(-9),.lobyte(0),.lobyte(-4),.lobyte(-5),.lobyte(5),.lobyte(-5)
   .byte .lobyte(12),.lobyte(1),.lobyte(5),.lobyte(7),.lobyte(-7),.lobyte(6),.lobyte(-12),.lobyte(-1),.lobyte(-5),.lobyte(-7),.lobyte(7),.lobyte(-6),.lobyte(15),.lobyte(1),.lobyte(6),.lobyte(9),.lobyte(-10),.lobyte(8),.lobyte(-15),.lobyte(-1),.lobyte(-6),.lobyte(-9),.lobyte(10),.lobyte(-8)
