@@ -1115,6 +1115,7 @@ rp2: mov a,$f6
   mov $06,a
   ; $48 = last port-0 value seen (song-2 edge detect): 0 after the IPL clears page 0
 {init}
+  call !{BRIDGE_ADDR + 3}     ; v1.1: after a swap, run the song's init (mute/echo flush) instantly
 idle:
   mov a,$f4
   cmp a,#{REBOOT_CMD}
@@ -1132,10 +1133,7 @@ idle:
 {init2}
   bra idle
 reboot:
-  mov $f2,#$6c
-  mov $f3,#$e0            ; FLG: soft reset, mute, echo writes off
-  mov $f1,#$b0            ; IPL ROM on, clear input ports, timers off
-  jmp !$ffc0
+  jmp !{BRIDGE_ADDR}         ; v1.1: the music-swap bridge in page 1 (never overwritten), then the IPL
 ; ---- one tick of every track
 tick:
   mov $07,#0
@@ -1716,6 +1714,127 @@ SFX_A_BOSS = {11: 'bcannon', 12: 'charge', 13: 'shards', 14: 'ping', 15: 'weak'}
 SFX_B_BOSS = {7: 'rumble', 8: 'beam', 9: 'shardw', 10: 'megaboom', 11: 'bmsl'}
 SFX_B_TITLE = {13: 'menu_l', 14: 'menu_r', 15: 'menu_ok'}   # title image only
 
+SFX_A_FIELD = {11: 'tink'}       # v1.1, field image only: armour hit (streams live in page 1)
+SFX_B_FIELD = {13: 'pickup'}     # v1.1, field image only: power-up collected
+WARM_TICKS = init_stream()[1] + 1   # fast-forwarded ticks after a swap (init + first events)
+BRIDGE_ADDR = 0x0100             # page 1: bridge code + the field-only SFX streams (the stack, from $01EF down, keeps >= 16 bytes)
+
+def field_sfx_streams():
+    out = {}
+    # A11: bullet on armour: bright metallic tick + short high ping, placed live at the target
+    s = Sfx().src('hat')
+    s.step(124, 0x2600, DYN, kon=True)
+    s.step(104, 0x2200, DYN)
+    s.src('lead')
+    s.step(92, 0x2780, DYN, kon=True)
+    s.step(66, 0x2780, DYN)
+    s.step(44, 0x2700, DYN)
+    s.step(26, 0x2700, DYN)
+    s.step(12, 0x2700, DYN)
+    s.step(0, 0, DYN)
+    out['tink'] = s.end()
+    # B13: power-up: quick rising arpeggio swinging left -> right, then a sparkle circling the head
+    s = Sfx().src('lead')
+    for k, (p, x) in enumerate([(0x1300, -0.9), (0x17F0, -0.3), (0x1C80, 0.3), (0x2600, 0.9)]):
+        s.step(116, p, panb(x), kon=True).hold(1)
+    for k in range(4):
+        f = k / 3
+        s.step(110 * (1 - f) ** 0.8, 0x2600 + (0x100 if k % 2 else 0), panb(0.9 * math.cos(f * 2 * math.pi)))
+    s.step(0, 0, panb(0.0))
+    out['pickup'] = s.end()
+    return out
+
+def bridge_asm(S, tick):
+    """Page-1 code run instead of a hard mute when the S-CPU asks for an image swap ($FE): every voice
+    on a common sample (0-6) fades out slowly on its own while an E fifth swells in wide stereo
+    on two brass voices, with the echo still ringing, so the 0.6-1.7 s upload is never silent. The DSP keeps
+    playing through the IPL transfer; the new driver's init cuts it when the next song starts."""
+    def pr(inst, m):
+        p = pitch_reg(inst, m, S); return p & 0xFF, p >> 8
+    e3, b3, e2, e4 = pr('brass', 52), pr('brass', 59), pr('bass', 40), pr('lead', 64)
+    tab = [(0x5C, 0), (0x3D, 0), (0x2D, 0),
+           (0x20, 80), (0x21, 0xF0), (0x22, e3[0]), (0x23, e3[1]), (0x24, SRC['brass']), (0x25, 0), (0x27, 0xEB),
+           (0x30, 0xF0), (0x31, 80), (0x32, b3[0]), (0x33, b3[1]), (0x34, SRC['brass']), (0x35, 0), (0x37, 0xEB),
+           (0x4D, 0x0C), (0x4C, 0x0C)]
+    body = ', '.join(f'${r:02x},${v & 0xFF:02x}' for r, v in tab)
+    return f'''
+  jmp !bridge
+warmff:                   ; called by the driver's start: a warm start (swap) skips the init's waits
+  mov a,!warm
+  beq wr
+  mov a,#0
+  mov !warm,a
+  mov $e0,#{WARM_TICKS}
+wf:
+  call !{tick}
+  dbnz $e0,wf
+wr:
+  ret
+bridge:
+  mov a,#1
+  mov !warm,a
+  mov $f2,#$5d
+  mov $f3,#{DIR_ADDR >> 8}         ; DIR -> the field directory (entries 0-6 are the same in every image)
+  mov x,#$04
+bv:
+  mov $f2,x               ; SRCN of this voice
+  mov a,$f3
+  cmp a,#7
+  bcc bk
+  mov a,x                 ; image-only sample (may be overwritten): silence the voice
+  and a,#$f0
+  mov $f2,a
+  mov $f3,#0
+  inc a
+  mov $f2,a
+  mov $f3,#0
+  bra bn
+bk:
+  inc x                   ; ADSR1 = 0 -> GAIN mode, GAIN = slow exponential fade
+  mov $f2,x
+  mov $f3,#0
+  inc x
+  inc x
+  mov $f2,x
+  mov $f3,#$b3
+  dec x
+  dec x
+  dec x
+bn:
+  mov a,x
+  clrc
+  adc a,#$10
+  mov x,a
+  cmp x,#$84
+  bne bv
+  mov x,#0
+bt:
+  mov a,!btab+x
+  cmp a,#$ff
+  beq bd
+  mov $f2,a
+  inc x
+  mov a,!btab+x
+  mov $f3,a
+  inc x
+  bra bt
+bd:
+  mov $f1,#$b0            ; IPL ROM on, clear input ports, timers off
+  jmp !$ffc0
+btab: .byte {body}, $ff
+warm: .byte 0
+'''
+
+def page1_blob(S, tick=0):
+    """bridge code + field-only SFX streams, assembled at BRIDGE_ADDR -> (bytes, {name: addr})"""
+    from spcasm import Asm
+    code = Asm({}).assemble([(BRIDGE_ADDR, bridge_asm(S, tick))])[0][1]
+    out = bytearray(code); ext = {}
+    for n, b in field_sfx_streams().items():
+        ext[n] = BRIDGE_ADDR + len(out); out += b
+    assert BRIDGE_ADDR + len(out) <= 0x01E0, f'page 1 overflow: {len(out)} bytes'
+    return bytes(out), ext
+
 def sfx_section(org, external=None):
     """SFX engine code + pan law + pointer table + streams, assembled at org.
     external: {name: ARAM address} of streams that live outside the section (boss image only);
@@ -1734,6 +1853,11 @@ def sfx_section(org, external=None):
         names[i] = n if n in external else 'STUB'
     for i, n in list(SFX_B_BOSS.items()) + list(SFX_B_TITLE.items()):
         names[16 + i] = n if n in external else 'STUB'
+    if not external:                      # field image: its own extra sounds in the free ids
+        for i, n in SFX_A_FIELD.items():
+            names[i] = n
+        for i, n in SFX_B_FIELD.items():
+            names[16 + i] = n
     data = ''
     data += 'PANL: .byte ' + ','.join(map(str, panl)) + '\nPANR: .byte ' + ','.join(map(str, panr)) + '\n'
     data += 'SFXTAB: .word ' + ','.join(f'S_{n}' for n in names) + '\n'
@@ -1747,7 +1871,7 @@ def sfx_section(org, external=None):
 
 def assemble_driver(track_starts, sfx_org, track_starts2=None, timer_div=None, external=None):
     from spcasm import Asm
-    a = Asm({f'S_{n}': v for n, v in (external or {}).items()})
+    a = Asm({f'S_{n}': v for n, v in (external or FIELD_EXT).items()})
     secs = a.assemble([(DRIVER_ADDR, driver_main_asm(track_starts, track_starts2, timer_div)),
                        (sfx_org, sfx_section(sfx_org, external)[0])])
     return secs, a.syms
@@ -1792,16 +1916,19 @@ def write_upload_asm(image):
          '  plp', '  rts                       ; no APU answer: run without music',
          '@go_up:']
     kick = 0xCC
+    blocks = [(BRIDGE_ADDR, PAGE1, 'ApuPage1')]
     for i in range(nblk):
         blk = image[i * 0x8000:(i + 1) * 0x8000]
         open(os.path.join(OUT, f'apu_blk{i}.bin'), 'wb').write(blk)
-        dest = IMAGE_ADDR + i * 0x8000
+        blocks.append((IMAGE_ADDR + i * 0x8000, blk, f'ApuBlk{i}'))
+    open(os.path.join(OUT, 'apu_page1.bin'), 'wb').write(PAGE1)
+    for i, (dest, blk, lab) in enumerate(blocks):
         L += [f'  ; block {i}: {len(blk)} bytes -> ARAM ${dest:04X}',
               f'  ldx #${dest:04X}', '  stx $2142', '  lda #$01', '  sta $2141',
               f'  lda #${kick:02X}', '  sta $2140',
               f'@k{i}: cmp $2140', f'  bne @k{i}',
               '  ldx #$0000',
-              f'@b{i}: lda f:ApuBlk{i},x', '  sta $2141', '  txa', '  sta $2140',
+              f'@b{i}: lda f:{lab},x', '  sta $2141', '  txa', '  sta $2140',
               f'@e{i}: cmp $2140', f'  bne @e{i}',
               '  inx', f'  cpx #${len(blk):04X}', f'  bne @b{i}']
         kick = ((len(blk) - 1) + 2) & 0xFF
@@ -1813,14 +1940,22 @@ def write_upload_asm(image):
           '@go: cmp $2140', '  bne @go', '  plp', '  rts', '']
     for i in range(nblk):
         L += [f'.segment "BANK{5 + i}"', f'ApuBlk{i}: .incbin "../music/build/apu_blk{i}.bin"']
+        if i == nblk - 1:
+            L += ['ApuPage1: .incbin "../music/build/apu_page1.bin"']
     L += ['.segment "CODE"', '']
     open(os.path.join(OUT, 'apu_upload.inc'), 'w').write('\n'.join(L))
 
 def main():
     build_field(write=True)
 
+FIELD_EXT = {}
+PAGE1 = b''
+
 def build_field(write=True):
+    global PAGE1
     S = make_samples()
+    PAGE1, ext1 = page1_blob(S)
+    FIELD_EXT.clear(); FIELD_EXT.update(ext1)
     blobs = build_brr(S)
     srcn = {}
     ram = bytearray(0x10000)
@@ -1844,6 +1979,7 @@ def build_field(write=True):
     ram[blob_addr:blob_addr + len(blob)] = blob
     end = blob_addr + len(blob)
     secs, syms = assemble_driver(starts, sfx_addr)
+    PAGE1, _ = page1_blob(S, syms['tick'])   # now with the driver's tick address
     (o1, drv), (o2, sfxc) = secs
     assert len(sfxc) == sfx_len and len(drv) == main_len
     ram[sfx_addr:sfx_addr + sfx_len] = sfxc
@@ -1854,6 +1990,8 @@ def build_field(write=True):
     print(f'  song ${blob_addr:04X} {len(blob)} bytes; end ${end:04X}; free before echo: {ECHO_ADDR - end} bytes')
     assert end <= ECHO_ADDR, 'ARAM overflow into echo buffer'
     assert ECHO_ADDR + EDL * 0x800 <= 0x10000 and ECHO_ADDR % 0x100 == 0, 'echo buffer must not wrap'
+    ram[BRIDGE_ADDR:BRIDGE_ADDR + len(PAGE1)] = PAGE1
+    print(f'  page 1: bridge + field sfx {len(PAGE1)} bytes (${BRIDGE_ADDR:04X}-${BRIDGE_ADDR + len(PAGE1) - 1:04X})')
     image = bytes(ram[IMAGE_ADDR:end])
     info = dict(S=S, blobs=blobs, srcn=srcn, sfx_addr=sfx_addr, sfx_len=sfx_len, main_len=main_len,
                 song_addr=blob_addr, end=end, starts=starts)

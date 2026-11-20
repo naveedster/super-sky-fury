@@ -9,6 +9,44 @@ that name. The public overview is in the [README](../README.md).
 > They are excluded by `.gitignore` and are not in the repository. The release ROM is
 > `dist/super_sky_fury.sfc`. Current music renders are `music/{title,stage,boss,boss_victory}.{mp3,spc}`.
 
+## v1.1: stages, variety, hit feedback, sprite stacking
+
+Most v1.1 code lives in `src/v11.s` (bank $8C, called through `jsl` hooks and `T_x` trampolines into bank 0).
+
+### Sprite stacking (`tools/voxstack.py`)
+* **Models**: the plan-form polygons of the v1.0 jet, enemy fighter, bomber, and fortress are voxelized
+  (0.4-unit voxels) into solid models: fuselages are filled down to a keel line and wings become thick
+  plates. Ground props (control tower, fuel tanks, AA bunker) are built voxel by voxel.
+* **Render**: the model is rotated (nose pitch, bank, yaw), sliced into layers, and the layers are
+  stacked back to front with a z-buffer at 4x supersampling. Smooth normals come from the blurred
+  occupancy field. Each layer's top face gets a highlight, a 4x4 ordered dither runs between ramp
+  steps, and a 1-pixel dark outline is added. Colours are the game's existing 15-colour OBJ palette ramps.
+* **Frames**: the jet has 15 64x64 frames (5 bank levels x level/climb/dive, mirrored for left banks).
+  Enemy fighters have 16 headings (9 unique plus h-flips) at 32x32 and 8 headings at 16x16. Each
+  ground prop has 16 headings at 32x32 plus mid and far 16x16 frames. The frame is picked from the
+  object's heading relative to the camera.
+* **VRAM streaming**: the chase sheet holds one 64x64 jet slot and six 32x32 slots. The frames live in
+  ROM banks $8D/$8E. `X_Stream` runs at the end of the NMI, after every other VRAM job, and reads the V
+  counter before each upload. A jet frame (2 KB) starts only before line 18 of vblank and a slot (512 B)
+  only before line 27, with at most 3 slots per frame. Slots are assigned least-recently-drawn, and an
+  object whose frame is not resident yet draws a static fallback frame for that frame. Measured worst
+  NMI end is 32 lines into the 37-line vblank (snes9x and Mesen-S). Streaming is off while the boss
+  sheet is resident or streaming.
+* **Ground props**: grouped into 8 bases per map (airfield, towns, AA sites). A base is culled with one
+  box test and one rotation, and its props use 8-bit offset rotations. The full projection runs every
+  other frame; in between, props glide on their measured screen velocity. Under load (more than 105
+  lines used when props are reached) they glide instead of being re-projected. At most 4 props are drawn,
+  and they sort by depth with the other objects.
+
+### Performance (6 input-shifted runs of each 90 s script, snes9x, RING build)
+| | v1.0 over262 / over250 / p99 / mean | v1.1 |
+|---|---|---|
+| chase (sa0) | 4 / 17 / 215 / 124 | 7 / 55 / 225 / 155 |
+| overhead (sa1) | 1 / 3 / 221 / 132 | 0 / 1 / 210 / 151 |
+| cockpit (sa2) | 0 / 0 / 201 / 116 | 0 / 0 / 213 / 140 |
+
+(over262 = frames that missed 60 fps, out of about 32,000 per row.)
+
 ## Title screen and start menu (title v1, current)
 
 ROM: `dist/super_sky_fury.sfc` (also `super_sky_fury_v1.sfc` / `snesfly_title_v1.sfc` locally),

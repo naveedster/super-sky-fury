@@ -7,9 +7,10 @@ Developed by **Naveed Farbakhsh**.
 
 ![Title screen](docs/screenshots/title_screen.png)
 
-Fly a fighter jet over an endless, procedurally generated ocean of islands, towns, and
-airfields. Shoot down enemy waves, out-turn heat-seeking missiles, and take on a giant robot
-boss, with a loud, wide stereo soundtrack and sound effects. The game runs on real SNES
+Fly a fighter jet across four stages (ocean, desert, arctic, and a night raid) over procedurally
+generated islands, towns, and airfields. Shoot down enemy waves and an armoured sky fortress, grab
+power-ups, out-turn heat-seeking missiles, and take on a giant robot boss, with a loud, wide stereo
+soundtrack and sound effects. The game runs on real SNES
 hardware (through a flash cart such as an FXPak Pro/SD2SNES or EverDrive) and in any accurate
 SNES emulator.
 
@@ -17,6 +18,8 @@ SNES emulator.
 |---|---|
 | ![Chase view](docs/screenshots/gameplay_chase.png) | ![Boss fight](docs/screenshots/gameplay_boss.png) |
 | ![Cockpit view](docs/screenshots/gameplay_cockpit.png) | ![Overhead view](docs/screenshots/gameplay_overhead.png) |
+| ![Desert Storm](docs/screenshots/stage_desert.png) | ![Arctic Front](docs/screenshots/stage_arctic.png) |
+| ![Night Raid](docs/screenshots/stage_night.png) | ![Sky fortress](docs/screenshots/fortress.png) |
 
 ## Features
 
@@ -25,6 +28,19 @@ SNES emulator.
   rotating overhead view with translucent shadows.
 * **Combat**: twin cannons, lock-on heat-seeking missiles, an afterburner, and hard banking.
   Enemies fire tracers and missiles, with on-screen warnings telling you how to dodge.
+* **Four stages**: OCEAN STRIKE, DESERT STORM, ARCTIC FRONT, and NIGHT RAID, each with its own
+  Mode 7 ground, sky, and haze, then the boss.
+* **Enemy variety**: fighters in scripted formations, swoopers, fast darts, kamikazes, armoured
+  bombers that smoke and shoot back, and a six-engine **sky fortress** mid-boss with its own health bar.
+* **Power-ups and combo**: SPREAD gun (P), RAPID missiles (M), and SHIELD (S) capsules, plus a kill
+  combo multiplier with floating "+N00 xM" score pop-ups.
+* **Hit feedback**: impact sparks, white hit flashes, knockback jolts, hit-stop, floating damage
+  numbers, smoke and scorch marks on damaged armour, a boss bar with a lagging damage segment, bigger
+  effects for missiles and weak points, and panned hit sounds.
+* **Sprite-stacked 3D sprites**: the player jet, the enemy planes, and ground props (towers, fuel
+  tanks, AA bunkers standing on the Mode 7 plane) are small voxel models rendered offline by
+  sprite stacking at 16 headings (plus bank and climb/dive frames for your jet). The game picks the
+  frame from the object's heading relative to the camera and streams only the frames in use to VRAM.
 * **Boss fight**: a giant robot with weak points, three attack phases, and its own music.
 * **Original 16-bit soundtrack**: title, stage, and boss themes plus a victory jingle on a
   custom SPC700 sound driver. Sound effects are hard-panned and moving (STEREO by default, with
@@ -45,6 +61,10 @@ SNES emulator.
 | Menu | Options | Credits |
 |---|---|---|
 | ![Menu](docs/screenshots/title_menu.png) | ![Options](docs/screenshots/title_options.png) | ![Credits](docs/screenshots/title_credits.png) |
+
+![Sprite stacking, before and after](docs/screenshots/sprite_stack_before_after.png)
+
+![Hit feedback](docs/screenshots/hit_feedback.png)
 
 ## Play it
 
@@ -103,7 +123,7 @@ dist/       the release ROM
 | Emulator | Result |
 |---|---|
 | snes9x (libretro) | works |
-| Snes9x 1.55, the core used by Delta (iOS) | works, pixel-identical to snes9x |
+| Snes9x 1.55, the core used by Delta (iOS) | works, same gameplay frame for frame as snes9x |
 | bsnes (default and accuracy settings) | works |
 | bsnes2014 accuracy | works, 60 fps with no dropped frames |
 | Mesen-S | works |
@@ -111,6 +131,34 @@ dist/       the release ROM
 Audio has also been checked on snes9x2002/2005/2010, bsnes-hd, bsnes-mercury, and Mesen2.
 For the full test methodology and the hardware-safety rules the code follows, see
 [docs/TECHNICAL.md](docs/TECHNICAL.md).
+
+## Changelog
+
+### v1.1 (2026-11-20)
+
+* **More variety**: four stages (OCEAN STRIKE, DESERT STORM, ARCTIC FRONT, NIGHT RAID), each with
+  its own Mode 7 ground, sky, and haze. New enemies: armoured bombers, kamikazes, darts, swoopers,
+  scripted formations, and the sky fortress mid-boss.
+* **Power-ups and combo**: SPREAD gun, RAPID missiles, and SHIELD +8 capsules (every 7th kill drops
+  one, and capsules drift toward you), and a kill combo multiplier.
+* **Hit feedback** (sparks, white flash, knockback, hit-stop, floating damage numbers, armour and
+  boss damage states, a lagging and flashing boss bar, bigger missile and weak-point hits, panned
+  hit sounds), plus screen shake, bigger explosions, and a boss intro.
+* **Sprite stacking**: voxel models for the jet, enemy planes, bombers, the fortress, and new ground
+  props, rendered offline at 16 headings (the jet also has 5 bank levels x level/climb/dive), and
+  quantized to the SNES 15-colour sprite palettes with shading and outlines (`tools/voxstack.py`).
+  The NMI streams only the frames in use (one 64x64 jet slot and six 32x32 slots) inside a
+  scanline budget, so VRAM is still written only during vblank.
+* **Fixes**: no more silence when the music switches (the boss warp gap went from 1.10 s to 0 s, and
+  the worst gap in a busy run from 1.65 s to 0.03 s). Faster sprite emission, cheaper overhead
+  contrails, and a frame budget for ground-table rebuilds and ground props keep the extra enemies and
+  effects at 60 fps in nearly every frame (over 99.9% in the scripted test runs).
+* Boss health (150 HP on loop 1) and lives per difficulty are unchanged.
+
+### v1.0
+
+* First release: three camera views, combat, the robot boss, title screen and menu, stereo
+  soundtrack, and the in-browser player.
 
 ## Credits
 

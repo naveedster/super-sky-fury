@@ -66,6 +66,11 @@ def fbm(size, base, octaves, seed):
 
 # ----------------------------------------------------------------- terrain
 G = terrain.build(CGRAM, OUT)
+# v1.1: a second, land-heavy map (desert / arctic stages): big landmasses around inland seas and canyons
+_CG2 = list(CGRAM)
+terrain.build(_CG2, OUT, rng_seed=4321, suffix="B", nseed=500, islands=[
+    (130, 130, 92), (390, 130, 84), (130, 390, 86), (392, 392, 96), (256, 256, 44), (256, 40, 34), (40, 256, 30),
+    (470, 256, 36), (256, 470, 32), (200, 200, 30), (320, 330, 28), (60, 60, 26), (470, 60, 22)])
 
 # ----------------------------------------------------------------- tile helpers
 def to4bpp(t):  # t 8x8 indices 0..15
@@ -290,6 +295,19 @@ def render_enemy(view, roll_deg, yaw_deg, size, scale, pitch_deg=38, ss=4, outli
     return render_shaded(enemy_polys(), EN_RAMPS, view, roll_deg, yaw_deg, size, scale, pitch_deg, ss,
                          outline=1 if outline else 0)
 
+# ----------------------------------------------------------------- v1.1 sprite stacking (tools/voxstack.py)
+# The plan-form polygons above are voxelized into solid models; every frame is a sprite-stacked render.
+import voxstack as vs
+VOX_JET = vs.voxelize(jet_polys(), 0.4, fill={"body": 0.9, "spine": 0.9, "canopy": 2.25, "radome": 0.9})
+VOX_EN = vs.voxelize(enemy_polys(), 0.4, fill={"body": 0.9, "spine": 0.9, "canopy": 2.2})
+render_jet_poly = render_jet; render_enemy_poly = render_enemy
+def render_jet(view, roll_deg, size, scale, pitch_deg=50, ss=4, nose=0.0):
+    return vs.render(VOX_JET, JET_RAMPS, view, roll=roll_deg, pitch_cam=pitch_deg, size=size, scale=scale,
+                     oy=0 if view == "top" else -2, nose_pitch=nose)
+def render_enemy(view, roll_deg, yaw_deg, size, scale, pitch_deg=38, ss=4, outline=True):
+    return vs.render(VOX_EN, EN_RAMPS, view, roll=roll_deg, yaw=yaw_deg, pitch_cam=pitch_deg, size=size, scale=scale,
+                     outline=1 if outline else 0, dither=size > 16)
+
 def tiny(rows, size=16):
     """hand-drawn tiny sprite, centred in a size x size cell. rows: strings of palette digits/hex."""
     g = np.zeros((size, size), np.uint8); h_ = len(rows); w_ = len(rows[0])
@@ -457,6 +475,104 @@ def fx_frames(two_big=True, two_debris=True, extra=True):
     f["EBUL0"] = ebullet(True); f["EBUL1"] = ebullet(False); f["EMSL"] = emissile()
     return f
 
+# ----------------------------------------------------------------- v1.1 art: bomber, sky fortress, power-ups, hit spark, popup font
+def bomber_polys(span=15.0, eng=(5.0, 10.0), length=16.0, chord=1.0):
+    P = []
+    def sym(pts, m):
+        P.append((pts, m)); P.append(([(-x, y, z) for x, y, z in pts][::-1], m))
+    L = length
+    sym([(0, -L, 1.8), (2.2, -L + 4, 2.2), (2.8, -2, 2.3), (2.6, L - 4, 2.0), (1.4, L, 1.8), (0, L, 2.3)], "body")
+    sym([(0, -L, 1.9), (1.0, -L + 4, 2.5), (1.0, L - 3, 2.6), (0, L - 2, 2.7)], "spine")
+    c = chord
+    sym([(2.6, -3.0 * c, 1.2), (span, -1.0 * c, 1.0), (span, 2.6 * c, 1.0), (2.6, 4.0 * c, 1.2)], "wing")
+    sym([(2.6, -3.0 * c, 1.25), (span, -1.0 * c, 1.05), (span, -0.2 * c, 1.05), (2.6, -2.2 * c, 1.25)], "edge")
+    for ex in eng:
+        sym([(ex - 1.2, -6.0, 1.0), (ex + 1.2, -6.0, 1.0), (ex + 1.2, 2.0, 1.0), (ex - 1.2, 2.0, 1.0)], "metal")
+        sym([(ex - 0.9, -6.6, 1.05), (ex + 0.9, -6.6, 1.05), (ex + 0.9, -5.4, 1.05), (ex - 0.9, -5.4, 1.05)], "dark")
+        sym([(ex - 0.5, 1.6, 1.1), (ex + 0.5, 1.6, 1.1), (ex + 0.5, 2.6, 1.1), (ex - 0.5, 2.6, 1.1)], "glow")
+    sym([(1.4, L - 4, 1.9), (6.5, L - 2.5, 1.7), (6.5, L - 0.8, 1.7), (1.4, L - 0.6, 1.9)], "wing")
+    sym([(4.8, L - 4.0, 1.8), (5.2, L - 0.8, 1.8), (5.4, L - 0.6, 6.4), (5.0, L - 3.2, 6.2)], "fin")
+    P.append(([(0, -L + 1.5, 2.5), (1.3, -L + 3.8, 2.8), (1.3, -L + 6.5, 2.8), (0, -L + 7.5, 2.7), (-1.3, -L + 6.5, 2.8), (-1.3, -L + 3.8, 2.8)], "canopy"))
+    P.append(([(0, -L + 2.0, 2.9), (0.6, -L + 3.8, 3.0), (0.4, -L + 5.0, 3.0), (0, -L + 4.4, 3.0)], "glint"))
+    return P
+
+def render_bomber_poly(size, scale, **kw):
+    return render_shaded(bomber_polys(chord=1.4, **kw), EN_RAMPS, "chase", 0, 180, size, scale, 52, 4, outline=1)
+BOMB_FILL = {"body": 1.1, "spine": 1.1, "canopy": 2.3, "metal": 0.3}
+VOX_BOMB = vs.voxelize(bomber_polys(chord=1.4), 0.4, fill=BOMB_FILL)
+def render_bomber(size, scale, **kw):
+    return vs.render(VOX_BOMB, EN_RAMPS, "chase", yaw=180, pitch_cam=52, size=size, scale=scale, dither=size > 16)
+
+def fortress_cells():
+    """the mid-boss: a 96x32 six-engine sky fortress, cut into a centre cell and a left-wing cell
+    (the right wing is the left one h-flipped)"""
+    vf = vs.voxelize(bomber_polys(span=44.0, eng=(6.5, 17.0, 30.0), length=15.0, chord=2.2), 0.4, fill=BOMB_FILL)
+    big = vs.render(vf, EN_RAMPS, "chase", yaw=180, pitch_cam=56, size=96, scale=1.04)
+    ys = np.nonzero(big.any(axis=1))[0]; cy = (ys.min() + ys.max() + 1) // 2
+    y0 = max(0, min(96 - 32, cy - 16)); band = big[y0:y0 + 32]
+    left = band[:, 0:32].copy(); centre = band[:, 32:64].copy()
+    return centre, left
+
+def capsule(letter, body):
+    """16x16 power-up capsule, HUD palette 2: 8 = dark outline, 6 = white, 7 = highlight"""
+    g = np.zeros((16, 16), np.uint8)
+    yy_, xx_ = np.mgrid[0:16, 0:16] + 0.5
+    d = np.maximum(np.abs(xx_ - 8) - 3.0, 0) ** 2 + (yy_ - 8) ** 2
+    g[d < 6.6 ** 2] = 8
+    g[d < 5.4 ** 2] = body
+    g[(d < 5.4 ** 2) & (yy_ < 4.6)] = 7 if body != 9 else 14 - 8
+    F = {"P": ["111.", "1..1", "111.", "1...", "1..."], "M": ["1...1", "11.11", "1.1.1", "1...1", "1...1"],
+         "S": [".111", "1...", ".11.", "...1", "111."]}[letter]
+    w = len(F[0]); x0 = 8 - w // 2 - (0 if w % 2 else 0); y0 = 5
+    for y, r in enumerate(F):
+        for x, ch in enumerate(r):
+            if ch == '1':
+                g[y0 + y, x0 + x] = 6
+                if g[y0 + y + 1, x0 + x] not in (6,): g[y0 + y + 1, x0 + x] = 8
+    return g
+
+def hit_spark():
+    """impact spark: thin 4-point white-hot star (palette 0: 13 white, 14 yellow, 9/8 orange)"""
+    g = np.zeros((16, 16), np.uint8); c = 7.5
+    for y in range(16):
+        for x in range(16):
+            dx, dy = abs(x - c), abs(y - c)
+            ray = (dx < 0.9 and dy < 7.6) or (dy < 0.9 and dx < 7.6)
+            diag = abs(dx - dy) < 0.8 and dx < 3.8
+            if ray or diag:
+                r_ = max(dx, dy)
+                g[y, x] = 13 if r_ < 2.2 else (14 if r_ < 4.2 else (9 if r_ < 6 else 8))
+            if dx * dx + dy * dy < 4.2: g[y, x] = 13
+    return g
+
+POPFONT = "0123456789+x"
+POP_GLYPHS = {
+    '0': ["1111", "1..1", "1..1", "1..1", "1..1", "1111"], '1': [".11.", "111.", ".11.", ".11.", ".11.", "1111"],
+    '2': ["1111", "...1", "1111", "1...", "1...", "1111"], '3': ["1111", "...1", ".111", "...1", "...1", "1111"],
+    '4': ["1..1", "1..1", "1111", "...1", "...1", "...1"], '5': ["1111", "1...", "1111", "...1", "...1", "1111"],
+    '6': ["1111", "1...", "1111", "1..1", "1..1", "1111"], '7': ["1111", "...1", "..1.", ".1..", ".1..", ".1.."],
+    '8': ["1111", "1..1", "1111", "1..1", "1..1", "1111"], '9': ["1111", "1..1", "1111", "...1", "...1", "1111"],
+    '+': ["....", ".11.", "1111", "1111", ".11.", "...."], 'x': ["....", "1..1", ".11.", ".11.", "1..1", "...."]}
+def pop_glyph(ch, col):
+    """8x8 popup character: 4x6 bold glyph (colour col) with a 1 px dark outline (8), HUD palette 2"""
+    g = np.zeros((8, 8), np.uint8)
+    for y, r in enumerate(POP_GLYPHS[ch]):
+        for x, c in enumerate(r):
+            if c == '1':
+                for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1), (1, 1)):
+                        yy_, xx_ = y + 1 + dy, x + 2 + dx
+                        if 0 <= yy_ < 8 and 0 <= xx_ < 8 and g[yy_, xx_] == 0: g[yy_, xx_] = 8
+    for y, r in enumerate(POP_GLYPHS[ch]):
+        for x, c in enumerate(r):
+            if c == '1': g[y + 1, x + 2] = col
+    return g
+BOMB_N = render_bomber(32, 0.98); BOMB_F = render_bomber(16, 0.47)
+FORT_C, FORT_W = fortress_cells()
+def v11_frames():
+    return {"BOMB_N": BOMB_N, "BOMB_F": BOMB_F, "FORT_C": FORT_C, "FORT_W": FORT_W,
+            "PU_P": capsule("P", 9), "PU_M": capsule("M", 4), "PU_S": capsule("S", 1), "HSPARK": hit_spark(),
+            "POP0": np.zeros((16, 32), np.uint8), "POP1": np.zeros((16, 32), np.uint8)}
+
 symbols = {}
 def emit_sheet(view, sheet):
     free = sheet.pack(); print(f"sheet {view}: {free} tiles free")
@@ -476,15 +592,30 @@ emit_sheet("over", sh)
 jet_top0 = sh.a.copy()
 # chase sheet
 sh = Sheet()
-for i, r in enumerate((0, 22, 44)):
-    jg = render_jet("chase", r, 64, 1.9, pitch_deg=38); sh.put(f"JET{i}", jg)
+# v1.1 sprite stacking: the chase jet is ONE 64x64 VRAM slot; its 15 frames (5 bank x level/climb/dive)
+# live in ROM and the NMI streams the one in use (src/v11.s X_Stream)
+JET_ROLLS = (0, 11, 22, 33, 44); JET_NOSE = (0, 14, -14)
+jet_frames = [render_jet("chase", r, 64, 1.9, pitch_deg=38, nose=p) for p in JET_NOSE for r in JET_ROLLS]
+sh.put("JETS", jet_frames[0])
+wingtips = []
+for jg in jet_frames:
     ys, xs = np.nonzero(jg > 1)
     li = xs.argmin(); ri = xs.argmax()
-    symbols[f"WT{i}_LX"] = int(xs[li]); symbols[f"WT{i}_LY"] = int(ys[li]); symbols[f"WT{i}_RX"] = int(xs[ri]); symbols[f"WT{i}_RY"] = int(ys[ri])
-for i, c in enumerate(clouds_big): sh.put(f"CLOUDB{i}", c)
-for i, c in enumerate(clouds_small): sh.put(f"CLOUDS{i}", c)
+    wingtips.append((int(xs[li]), int(ys[li]), int(xs[ri]), int(ys[ri])))
+# streamed 32x32 slots: near enemies (9 unique yaws of 16, the rest h-flipped) and near ground props (16 yaws)
+EN_YAWS = [render_enemy("chase", 0, u * 22.5, 32, 1.02) for u in range(9)]
+for k in range(6): sh.put(f"SLOT{k}", EN_YAWS[8])
+for u in range(5): sh.put(f"EMY{u}", render_enemy("chase", 0, u * 45.0, 16, 0.50))
+PROPS = vs.prop_models(); PROP_TYPES = ("tower", "tank", "bunker")
+def render_prop(t, yaw, size, scale, pc, outline=1):
+    return vs.render(PROPS[t], vs.PROP_RAMPS, "chase", yaw=yaw, pitch_cam=pc, size=size, scale=scale,
+                     oy=size / 2 - 3, dither=size > 16, flat_top=0.18, outline=outline)
+PROP_NEAR = [[render_prop(t, d * 22.5, 32, 1.4, 30) for d in range(16)] for t in PROP_TYPES]
+for i, t in enumerate(PROP_TYPES):
+    sh.put(f"PRM{i}", render_prop(t, 30, 16, 0.7, 22)); sh.put(f"PRF{i}", render_prop(t, 30, 16, 0.36, 15, outline=0))
+sh.put("CLOUDB0", clouds_big[0]); sh.put("CLOUDS0", clouds_small[0])   # v1.1: one shape each (h-flipped for variety)
 # far clouds in the chase view: 16x16 half-size copies (1 sprite instead of 4)
-for i, c in enumerate(clouds_small):
+for i, c in enumerate(clouds_small[:1]):
     b = np.asarray(c).reshape(16, 2, 16, 2)
     cov = (b > 0).sum(axis=(1, 3)) >= 2
     t = np.where(cov, b[:, 0, :, 0], 0)
@@ -493,15 +624,62 @@ for i, c in enumerate(clouds_small):
 # chase view runs OBSEL 16x16/64x64: dots + flames are 16x16 (flame content shifted 8 px left)
 for i, p in enumerate((1, 2, 3)): sh.put(f"DOT{i}", dot(32, p)[:16, :16])
 sh.put("FLAME0", flame(32, 12, 0, "chase")[:16, 8:24]); sh.put("FLAME1", flame(32, 12, 1, "chase")[:16, 8:24])
-for k, g in enemy_frames_persp().items(): sh.put(k, g)
+for k, g in enemy_frames_persp(include_away=False, include_bank=False).items():
+    if k != "EM": sh.put(k, g)            # (chase medium enemies are the 8-direction EMY frames)
 for k, g in fx_frames().items(): sh.put(k, g)
+for k, g in v11_frames().items(): sh.put(k, g)
 emit_sheet("chase", sh)
 chase_sheet = sh
+# ---- v1.1 sprite-stack streaming data (ROM banks $8D / $8E, see src/v11.s X_Stream)
+def tile_rows(g, tw):
+    out = bytearray()
+    for ty in range(g.shape[0] // 8):
+        for tx in range(tw):
+            out += to4bpp(g[ty * 8:ty * 8 + 8, tx * 8:tx * 8 + 8])
+    return bytes(out)
+open(f"{OUT}/jetframes.bin", "wb").write(b"".join(tile_rows(j, 8) for j in jet_frames))
+SLOT_FRAMES = EN_YAWS + [f for fr in PROP_NEAR for f in fr]
+open(f"{OUT}/slotframes.bin", "wb").write(b"".join(tile_rows(f, 4) for f in SLOT_FRAMES))
+def place_bases(info, seed, nbase=8):
+    """ground props for one Mode 7 map, grouped in bases (so the game culls a whole base at once):
+    the airfield (tower, fuel tanks, AA bunkers), every town, then AA sites on open land.
+    -> [(cx, cy, [(ox, oy, type, yaw16), ...])] in map pixels; |offsets| < 64."""
+    land = info["land"]; r_ = np.random.default_rng(seed); bases = []
+    def onland(x, y): return bool(land[int(y) % 1024, int(x) % 1024])
+    def far(x, y): return all(min(abs(x - a), 1024 - abs(x - a)) + min(abs(y - b), 1024 - abs(y - b)) > 150 for a, b, _ in bases)
+    def base(cx, cy, layout):
+        if len(bases) >= nbase or not far(cx, cy): return
+        ps = [(ox, oy, t, int(r_.integers(16))) for ox, oy, t in layout if onland(cx + ox, cy + oy)]
+        if len(ps) >= 2: bases.append((int(cx) % 1024, int(cy) % 1024, ps))
+    if info["airfield"]:
+        y, x0, L = info["airfield"]; cx = (x0 + L / 2) * 8; cy = y * 8 + 8
+        base(cx, cy, [(-L * 4 + 6, -22, 0), (L * 4 - 14, 26, 1), (L * 4 - 34, 28, 1), (-L * 4 - 18, 4, 2), (L * 4 + 18, 6, 2)])
+    for ty, tx in info["towns"]:
+        base(tx * 8, ty * 8, [(-30, -20, 0), (28, 22, 1), (10, -36, 2), (-34, 26, 2)])
+    tries = 0
+    while len(bases) < nbase and tries < 3000:
+        tries += 1; cx, cy = r_.integers(1024), r_.integers(1024)
+        if onland(cx, cy): base(cx, cy, [(0, 0, 2), (-34, 18, 2), (30, -16, 1), (20, 30, 2)])
+    return bases
+PROP_MAPS = [place_bases(terrain.INFO[""], 5), place_bases(terrain.INFO["B"], 6)]
+print("ground prop bases:", [len(m) for m in PROP_MAPS], "props:", [sum(len(b[2]) for b in m) for m in PROP_MAPS])
+with open(f"{OUT}/stack.inc", "w") as fo:
+    fo.write("; generated by tools/gen_assets.py (v1.1 sprite stacking)\n")
+    fo.write(f"JS_N = {len(jet_frames)}\nSS_EN = 0\nSS_PR = {len(EN_YAWS)}\nNBASE = {len(max(PROP_MAPS, key=len))}\n")
+    fo.write("WingTips:  ; per jet frame: LX LY RX RY\n")
+    for w in wingtips: fo.write("  .word " + ", ".join(str(v) for v in w) + "\n")
+    k = 0; props = []
+    for mi, m in enumerate(PROP_MAPS):
+        m = m + [(0, 0, [])] * (len(max(PROP_MAPS, key=len)) - len(m))
+        fo.write(f"BaseMap{mi}:  ; centre x, y, prop count, first prop offset (bytes)\n")
+        for cx, cy, ps in m:
+            fo.write(f"  .word {cx}, {cy}, {len(ps)}, {k * 8}\n"); k += len(ps); props += ps
+    fo.write("PropOff:  ; dx, dy (from the base centre), type, yaw (16ths)\n")
+    for ox, oy, t, yw in props: fo.write(f"  .word {ox & 0xFFFF}, {oy & 0xFFFF}, {t}, {yw}\n")
 
 # cockpit sheet: pal2 HUD (green), clouds pal1, frame pal3
 sh = Sheet()
-for i, c in enumerate(clouds_big): sh.put(f"CLOUDB{i}", c)
-for i, c in enumerate(clouds_small): sh.put(f"CLOUDS{i}", c)
+sh.put("CLOUDB0", clouds_big[0]); sh.put("CLOUDS0", clouds_small[0])
 g = np.zeros((32, 32), np.uint8)
 im = Image.fromarray(g); d = ImageDraw.Draw(im)
 d.ellipse((6, 6, 25, 25), outline=1); d.line((15, 0, 15, 4), fill=1); d.line((15, 27, 15, 31), fill=1)
@@ -541,6 +719,8 @@ g = np.zeros((16, 16), np.uint8); g[:, 0:10] = 3; g[:, 10:12] = 4; g[:, 0:2] = 1
 sh.put("PILLAR", g)   # 16x16 (12 sprites) so the enemy tracers / missile fit in the cockpit sheet
 for k, g in enemy_frames_persp(include_away=False, include_bank=False).items(): sh.put(k, g)
 for k, g in fx_frames(two_big=True, two_debris=False, extra=False).items(): sh.put(k, g)
+for k, g in v11_frames().items():
+    if k != "HSPARK": sh.put(k, g)        # (cockpit sheet is 4 tiles short: its spark is the X16A star)
 emit_sheet("cock", sh)
 cock_sheet = sh
 
@@ -571,8 +751,9 @@ def boss_sheet(view, field, drop):
     lut = np.array([(255, 0, 255)] + [tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)) for h in boss_art.BOSS_PAL[1:]], np.uint8)
     Image.fromarray(lut[b.a]).save(f"{OUT}/sheet_{view}_boss.png")
     boss_out[view] = (b, rows)
-CLOUDS_ALL = ["CLOUDB0", "CLOUDB1", "CLOUDS0", "CLOUDS1"]
-boss_sheet("chase", chase_sheet, CLOUDS_ALL + ["CLOUDT0", "CLOUDT1", "EL_TOW", "EL_AWAY", "EM", "EM_BANK", "ES", "EXS", "EXXS"])
+CLOUDS_ALL = ["CLOUDB0", "CLOUDS0", "BOMB_N", "BOMB_F", "FORT_C", "FORT_W"]   # v1.1: no bombers during the boss
+boss_sheet("chase", chase_sheet, CLOUDS_ALL + ["CLOUDT0", "EL_TOW", "ES", "EXS", "EXXS"] + [f"SLOT{k}" for k in range(6)]
+           + [f"EMY{u}" for u in range(5)] + [f"PR{a}{i}" for a in "MF" for i in range(3)])
 boss_sheet("cock", cock_sheet, CLOUDS_ALL + ["EL_TOW", "EM", "ES", "EXS", "EXXS"])
 with open(f"{OUT}/boss.inc", "w") as fo:
     fo.write("; generated by tools/gen_assets.py (boss v1)\n")
@@ -838,7 +1019,11 @@ TEXTS = {"TX_WARN_F": "MISSILE! BREAK L/R", "TX_WARN_B": "MISSILE BEHIND! B:BOOS
          "TX_PRESS": "PRESS START FOR TITLE", "TX_FINAL": "FINAL SCORE", "TX_PAUSED": "PAUSED",
          "TX_BEAM": "BEAM! CLIMB OR DIVE", "TX_WARNING": "!! WARNING !!", "TX_MISSION": "MISSION COMPLETE",
          "TX_BONUS": "BONUS", "TX_BOSS": "BOSS", "TX_APPROACH": "HUGE ENEMY APPROACHING",
-         "TX_AIM": "MATCH HEIGHT - SHOOT GEM/EYES"}
+         "TX_AIM": "MATCH HEIGHT - SHOOT GEM/EYES", "TX_FORT": "FORTRESS",
+         "TX_ST1": "STAGE 1", "TX_ST2": "STAGE 2", "TX_ST3": "STAGE 3", "TX_ST4": "STAGE 4",
+         "TX_SN1": "OCEAN STRIKE", "TX_SN2": "DESERT STORM", "TX_SN3": "ARCTIC FRONT", "TX_SN4": "NIGHT RAID",
+         "TX_FORTW": "SKY FORTRESS APPROACHING", "TX_PUP_P": "SPREAD GUN!", "TX_PUP_M": "RAPID MISSILES!",
+         "TX_PUP_S": "SHIELD REPAIRED!"}
 with open(f"{OUT}/texts.inc", "w") as fo:
     for k, v in TEXTS.items():
         fo.write(f"{k}: .byte {len(v)}," + ",".join(str(ftile(ch)) for ch in v) + "\n")
@@ -999,6 +1184,101 @@ for i in range(lines):
     hz += bytes([0x20 | min(31, int(v * 0.8)), 0xC0 | min(31, int(v))])
 hz.append(1); hz += bytes([0x20, 0xC0]); hz.append(0)
 tabs["haze"] = bytes(hz)
+
+# ----------------------------------------------------------------- v1.1 stages: palettes, sky + haze tables
+# Each stage = full CGRAM image (ground recolour by terrain colour name, BG3 band, clouds) + sky gradient
+# (chase/cockpit CGRAM HDMA tables) + horizon haze (COLDATA HDMA). Map A = the archipelago, map B = land-heavy.
+GN = {n: s_ for (n, _), s_ in zip(terrain.GROUND, terrain.SLOTS)}
+STAGES = [
+  dict(name="OCEAN STRIKE", map=0, water="#1d4ea6", ground={}, band=None, cloud=(1.0, 1.0, 1.0),
+       sky=SKY_STOPS, haze=(0.8, 1.0, 1.0, 17)),
+  dict(name="DESERT STORM", map=1, water="#cfa062", ground=dict(
+       deep3="#c08e52", deep="#cfa062", deep2="#dcb072", swell="#e6c084", crest="#f0d29c", fleck="#f8e4bc", white="#fff2d8",
+       shal1="#c09058", shal2="#b07e4c", shal3="#9c6c42", shal4="#86593a", foam="#6e4830",
+       sand1="#c8643e", sand2="#ac5032", sand3="#8e3e28", wet="#723020",
+       g1="#e09656", g2="#cc8046", g3="#b86c3a", g4="#9e5830", g5="#844626",
+       f1="#a0603a", f2="#88502e", f3="#704026", f4="#58301c", f5="#402214",
+       r1="#ecdcbc", r2="#c8b28c", r3="#947e62", r4="#645442",
+       road1="#c0ae92", road2="#786a56", roof1="#d89868", roof2="#a86a44", roof3="#f2e2c8", roof4="#e4b070",
+       dark="#3c2a1a", plaza="#e2d2b0"),
+       band=["#000000", "#a8704a", "#d4a070", "#f6dcb4"], cloud=(1.0, 0.9, 0.76),
+       sky=[(0.0, "#2a58b0"), (0.40, "#5a88cc"), (0.72, "#b8b498"), (0.90, "#ecd0a0"), (1.0, "#f8e2b8")],
+       haze=(1.0, 0.72, 0.72, 20)),
+  dict(name="ARCTIC FRONT", map=1, water="#143658", ground=dict(
+       deep3="#0e2a46", deep="#143658", deep2="#1a4268", swell="#2a5a82", crest="#6c9ec2", fleck="#cce6f6", white="#ffffff",
+       shal1="#3c7ca2", shal2="#5c9ec2", shal3="#8ec6de", shal4="#bae2f0", foam="#f0f8fc",
+       sand1="#f4f8fc", sand2="#dce8f2", sand3="#bacadc", wet="#9cb2c6",
+       g1="#ffffff", g2="#eef4fa", g3="#d8e4f0", g4="#bccee0", g5="#a0b6cc",
+       f1="#5c7c76", f2="#486860", f3="#36544e", f4="#26403c", f5="#182c2a",
+       r1="#cad2da", r2="#9ca6b2", r3="#6e7886", r4="#4a525e",
+       wheat1="#e8eef4", wheat2="#c8d4e0", soil1="#8c98a6", soil2="#6c7886", crop1="#dce6ee", crop2="#c2d0dc",
+       road1="#8c949e", road2="#4c545e", roof3="#ffffff", dark="#1a2430", plaza="#d8e0e8"),
+       band=["#000000", "#8ea8c4", "#cadaea", "#ffffff"], cloud=(0.94, 0.97, 1.0),
+       sky=[(0.0, "#46669a"), (0.40, "#7898c2"), (0.75, "#b8cce2"), (1.0, "#f2f8fc")],
+       haze=(0.9, 1.0, 1.0, 22)),
+  dict(name="NIGHT RAID", map=0, water="#040c1e", ground=dict(
+       deep3="#020814", deep="#040c1e", deep2="#061428", swell="#0a1c36", crest="#1c3664", fleck="#4c70a6", white="#a4bce4",
+       shal1="#08183a", shal2="#0c2246", shal3="#123052", shal4="#1c405e", foam="#3c5c7c",
+       sand1="#2c2c3a", sand2="#22222e", sand3="#1a1a26", wet="#14141e",
+       g1="#162818", g2="#122214", g3="#0e1c10", g4="#0a160c", g5="#061008",
+       f1="#0e1e12", f2="#0a180e", f3="#08140a", f4="#060e06", f5="#040a04",
+       r1="#3c3c48", r2="#2e2e3a", r3="#22222c", r4="#181820",
+       wheat1="#201e16", wheat2="#1a1810", soil1="#16120e", soil2="#120e0a", crop1="#162216", crop2="#121c12",
+       road1="#ffb444", road2="#a8661e", roof1="#ffe274", roof2="#c48434", roof3="#fff8d4", roof4="#ffa444",
+       dark="#080808", plaza="#86643e", tarmac="#12161a", tarm2="#ff3a30"),
+       band=["#000000", "#0a1430", "#16244a", "#34446e"], cloud=(0.36, 0.42, 0.58),
+       sky=[(0.0, "#000004"), (0.50, "#040a20"), (0.85, "#0e1e48"), (1.0, "#283a6a")],
+       haze=(0.2, 0.5, 0.5, 9)),
+]
+def sky_words(stops):
+    out = []
+    for y in range(64):
+        t = y / 63
+        for (t0, c0), (t1, c1) in zip(stops, stops[1:]):
+            if t0 <= t <= t1:
+                a_, b_ = hexrgb(c0), hexrgb(c1); f_ = (t - t0) / (t1 - t0)
+                c = tuple(int(a_[i] + (b_[i] - a_[i]) * f_) for i in range(3)); break
+        out.append(bgr555(c))
+    return out
+def cg_tab(sw, sky_lines, rest):
+    out = bytearray(); out.append(0x80 | sky_lines)
+    for v in sw[64 - sky_lines:]: out += bytes([0, 0, v & 255, v >> 8])
+    for cnt, col in rest: hdma_count_split(cnt, bytes([0, 0, col & 255, col >> 8]), out)
+    out.append(0); return bytes(out)
+def haze_tab(rk, gk, bk, amp):
+    hz = bytearray(); hz.append(64); hz += bytes([0x20, 0xC0]); hz.append(0x80 | 64)
+    for i in range(64):
+        v = (1 - i / 64) ** 1.7 * amp
+        hz += bytes([0x20 | min(31, int(v * rk)), 0xC0 | min(31, int(v * gk))])
+    hz.append(1); hz += bytes([0x20, 0xC0]); hz.append(0); return bytes(hz)
+SKYTAB_SZ = 0x180; HAZE_SZ = 0xA0; OVER_SZ = 0x10
+stage_bin = bytearray()
+for st in STAGES:
+    cg = list(CGRAM)
+    for n, c in st["ground"].items(): cg[GN[n]] = hexrgb(c)
+    if st["band"]:
+        for i, c in enumerate(st["band"]): cg[28 + i] = hexrgb(c)
+    for i in range(1, 16):
+        r_, g_, b_ = CGRAM[144 + i]; k = st["cloud"]; cg[144 + i] = (int(r_ * k[0]), int(g_ * k[1]), int(b_ * k[2]))
+    pal = b"".join(struct.pack("<H", bgr555(c)) for c in cg)
+    sw = sky_words(st["sky"])
+    wt = bgr555(hexrgb(st["water"]))
+    t1 = cg_tab(sw, 64, [(136, wt), (1, STRIP)]); t2 = cg_tab(sw, 64, [(88, wt), (1, DASHBG)])
+    t3 = bytearray(); hdma_count_split(200, bytes([0, 0, wt & 255, wt >> 8]), t3)
+    hdma_count_split(1, bytes([0, 0, STRIP & 255, STRIP >> 8]), t3); t3.append(0)
+    assert len(t3) <= OVER_SZ
+    hz = haze_tab(*st["haze"][:3], st["haze"][3])
+    assert len(t1) <= SKYTAB_SZ and len(t2) <= SKYTAB_SZ and len(hz) <= HAZE_SZ
+    stage_bin += pal + t1.ljust(SKYTAB_SZ, b"\0") + t2.ljust(SKYTAB_SZ, b"\0") + hz.ljust(HAZE_SZ, b"\0") + bytes(t3).ljust(OVER_SZ, b"\0")
+    # preview of the recoloured map
+    mp = open(f"{OUT}/m7map{'B' if st['map'] else ''}.bin", "rb").read(); tl = open(f"{OUT}/m7tiles{'B' if st['map'] else ''}.bin", "rb").read()
+    idx = np.frombuffer(tl, np.uint8).reshape(256, 8, 8)[np.frombuffer(mp, np.uint8)].reshape(128, 128, 8, 8).swapaxes(1, 2).reshape(1024, 1024)
+    Image.fromarray(np.array(cg, np.uint8)[idx][::2, ::2]).save(f"{OUT}/preview_stage{STAGES.index(st)}.png")
+STAGE_SZ = 512 + 2 * SKYTAB_SZ + HAZE_SZ + OVER_SZ
+open(f"{OUT}/stages.bin", "wb").write(stage_bin)
+with open(f"{OUT}/stages.inc", "w") as fo:
+    fo.write(f"NSTAGES = {len(STAGES)}\nSTAGE_SZ = {STAGE_SZ}\nSKYTAB_SZ = {SKYTAB_SZ}\nHAZE_SZ = {HAZE_SZ}\nOVER_SZ = {OVER_SZ}\n")
+    fo.write("StageMap: .word " + ",".join(str(st["map"]) for st in STAGES) + "\n")
 with open(f"{OUT}/tables.inc", "w") as fo:
     for k, v in tabs.items():
         fo.write(f"{k}:\n")
@@ -1019,11 +1299,18 @@ with open(f"{OUT}/clouds.inc", "w") as fo:
 # 2 = 32x32 drawn as four 16x16 (chase), 3 = 32x32 small (overhead)
 FRAMES = ["EL_TOW", "EL_AWAY", "EM", "EM_BANK", "ES", "EXS", "EXXS", "X32A", "X32B", "X16A", "X16B",
           "DEB0", "DEB1", "BUL0", "BUL1", "MSL", "TOP0", "TOP1", "TOP2", "EBUL0", "EBUL1", "EMSL", "X16C", "PUFF",
-          "BORB0", "BORB1", "BSHARD", "EM"]
-BIG32 = ("EL_TOW", "EL_AWAY", "X32A", "X32B")
-SUBST = {"cock": {"X16C": "X16B", "PUFF": "EXXS", "EL_AWAY": "EL_TOW", "EM_BANK": "EM", "DEB1": "DEB0", "TOP0": "EM", "TOP1": "EM", "TOP2": "EM"},
-         "chase": {"TOP0": "EM", "TOP1": "EM", "TOP2": "EM"},
-         "over": {"BORB0": "EBUL0", "BORB1": "EBUL1", "BSHARD": "EBUL1", "PUFF": "X16B", "EL_TOW": "TOP0", "EL_AWAY": "TOP0", "EM": "TOP0", "EM_BANK": "TOP0", "ES": "TOP0", "EXS": "TOP0", "EXXS": "TOP0"}}
+          "BORB0", "BORB1", "BSHARD",
+          "BOMB_N", "BOMB_F", "FORT_C", "FORT_W", "PU_P", "PU_M", "PU_S", "HSPARK",
+          "EMY0", "EMY1", "EMY2", "EMY3", "EMY4", "SLOT0", "SLOT1", "SLOT2", "SLOT3", "SLOT4", "SLOT5",
+          "PRM0", "PRM1", "PRM2", "PRF0", "PRF1", "PRF2", "EM"]
+BIG32 = ("EL_TOW", "EL_AWAY", "X32A", "X32B", "BOMB_N", "FORT_C", "FORT_W", "SLOT0", "SLOT1", "SLOT2", "SLOT3", "SLOT4", "SLOT5")
+_V11S = {f"EMY{u}": "EM" for u in range(5)}; _V11S.update({f"SLOT{k}": "EL_TOW" for k in range(6)})
+_V11S.update({f"PR{a}{i}": "EXXS" for a in "MF" for i in range(3)})
+SUBST = {"cock": {"HSPARK": "X16A", "X16C": "X16B", "PUFF": "EXXS", "EL_AWAY": "EL_TOW", "EM_BANK": "EM", "DEB1": "DEB0", "TOP0": "EM", "TOP1": "EM", "TOP2": "EM"},
+         "chase": {"TOP0": "EMY4", "TOP1": "EMY4", "TOP2": "EMY4", "EM": "EMY4", "EL_AWAY": "EL_TOW", "EM_BANK": "EMY2"},
+         "over": {"BOMB_N": "TOP0", "BOMB_F": "TOP0", "FORT_C": "TOP0", "FORT_W": "TOP0", "PU_P": "X16A", "PU_M": "X16A",
+                  "PU_S": "X16A", "HSPARK": "X16A", "BORB0": "EBUL0", "BORB1": "EBUL1", "BSHARD": "EBUL1", "PUFF": "X16B", "EL_TOW": "TOP0", "EL_AWAY": "TOP0", "EM": "TOP0", "EM_BANK": "TOP0", "ES": "TOP0", "EXS": "TOP0", "EXXS": "TOP0"}}
+SUBST["cock"].update(_V11S); SUBST["over"].update({k: "TOP0" for k in _V11S})
 with open(f"{OUT}/frames.inc", "w") as fo:
     fo.write(f"NFRAMES = {len(FRAMES)}\nFrameTab:\n")
     for view in ("chase", "over", "cock"):
@@ -1036,6 +1323,12 @@ with open(f"{OUT}/frames.inc", "w") as fo:
         fo.write("  .word " + ",".join(f"${w:04x}" for w in words) + f"   ; {view}\n")
     for i, f in enumerate(FRAMES[:-1]):
         fo.write(f"F_{f} = {i}\n")
+for v in ("CHASE", "COCK"):
+    symbols[f"T_{v}_CLOUDB1"] = symbols[f"T_{v}_CLOUDB0"]; symbols[f"T_{v}_CLOUDS1"] = symbols[f"T_{v}_CLOUDS0"]
+pf = bytearray()
+for ch in POPFONT: pf += to4bpp(pop_glyph(ch, 6))
+for ch in POPFONT: pf += to4bpp(pop_glyph(ch, 9))     # orange set (combo multiplier)
+open(f"{OUT}/popfont.bin", "wb").write(pf)
 with open(f"{OUT}/symbols.inc", "w") as fo:
     for k, v in symbols.items(): fo.write(f"{k} = {v}\n")
 print("ok; symbols:", len(symbols))

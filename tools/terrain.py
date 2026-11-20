@@ -8,6 +8,7 @@ def hexrgb(h):
     h = h.lstrip('#'); return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
 
 # colour slots usable by Mode 7: 1..27, 32..47 (28..31 = BG3 horizon band), 112..127
+INFO = {}   # per map: land mask (1024^2), town tiles, airfield (v1.1 ground props)
 SLOTS = list(range(1, 28)) + list(range(32, 48)) + list(range(112, 128))
 GROUND = [
  ("deep3", "#123a88"), ("deep", "#18469a"), ("deep2", "#1e52aa"), ("swell", "#2c68c0"), ("crest", "#5c94dc"),
@@ -26,7 +27,7 @@ GROUND = [
 
 BAYER4 = np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]) / 16.0 + 1 / 32
 
-def build(CGRAM, OUT, rng_seed=1234):
+def build(CGRAM, OUT, rng_seed=1234, islands=None, suffix="", nseed=0):
     G = {}
     for (n, c), s in zip(GROUND, SLOTS):
         G[n] = s; CGRAM[s] = hexrgb(c)
@@ -61,7 +62,7 @@ def build(CGRAM, OUT, rng_seed=1234):
 
     N = 1024
     yy, xx = np.mgrid[0:N, 0:N].astype(float)
-    islands = [(250, 330, 62), (300, 280, 40), (210, 360, 34), (120, 120, 46), (150, 90, 26), (420, 90, 28),
+    islands = islands or [(250, 330, 62), (300, 280, 40), (210, 360, 34), (120, 120, 46), (150, 90, 26), (420, 90, 28),
                (440, 420, 52), (470, 450, 30), (60, 400, 30), (200, 470, 20), (300, 430, 16), (470, 260, 18),
                (160, 260, 14), (350, 160, 12), (40, 220, 16),
                (380, 330, 26), (90, 300, 20), (330, 40, 24), (30, 40, 18), (250, 185, 22), (400, 220, 14), (110, 480, 14)]
@@ -70,7 +71,7 @@ def build(CGRAM, OUT, rng_seed=1234):
         cx *= 2; cy *= 2; r *= 2.25
         dx = np.minimum(abs(xx - cx), N - abs(xx - cx)); dy = np.minimum(abs(yy - cy), N - abs(yy - cy))
         h = np.maximum(h, 1 - np.sqrt(dx * dx + dy * dy) / r)
-    h = h + (fbm(N, 6, 7, 7) - 0.5) * 1.6 + (fbm(N, 4, 3, 21) - 0.5) * 0.6 + (fbm(N, 20, 5, 33) - 0.5) * 0.9
+    h = h + (fbm(N, 6, 7, 7 + nseed) - 0.5) * 1.6 + (fbm(N, 4, 3, 21 + nseed) - 0.5) * 0.6 + (fbm(N, 20, 5, 33 + nseed) - 0.5) * 0.9
     land = h > 0.0
     # remove 1-px specks
     nb = sum(roll(land, dy, dx) for dy in (-1, 0, 1) for dx in (-1, 0, 1))
@@ -424,10 +425,11 @@ def build(CGRAM, OUT, rng_seed=1234):
     alltiles = np.zeros((256, 64), np.uint8)
     alltiles[:KO] = med_o; alltiles[KO:KO + len(med_l)] = med_l
     alltiles[alltiles == 0] = G["deep"]
-    open(f"{OUT}/m7map.bin", "wb").write(bytes(tilemap.astype(np.uint8)))
-    open(f"{OUT}/m7tiles.bin", "wb").write(bytes(alltiles.reshape(-1)))
+    open(f"{OUT}/m7map{suffix}.bin", "wb").write(bytes(tilemap.astype(np.uint8)))
+    open(f"{OUT}/m7tiles{suffix}.bin", "wb").write(bytes(alltiles.reshape(-1)))
     rec = alltiles[tilemap].reshape(T, T, 8, 8).swapaxes(1, 2).reshape(N, N)
-    Image.fromarray(rgb[rec].astype(np.uint8)).save(f"{OUT}/preview_map.png")
-    Image.fromarray(rgb[img].astype(np.uint8)).save(f"{OUT}/preview_map_full.png")
+    Image.fromarray(rgb[rec].astype(np.uint8)).save(f"{OUT}/preview_map{suffix}.png")
+    Image.fromarray(rgb[img].astype(np.uint8)).save(f"{OUT}/preview_map_full{suffix}.png")
     print("towns", towns, "airfield", airfield)
+    INFO[suffix] = dict(land=land, towns=list(towns), airfield=airfield)
     return G

@@ -13,10 +13,19 @@ CAMBACK    = 40          ; chase camera distance behind jet (px)
 NHIST      = 8           ; overhead contrail history length (a point every 5 frames)
 MSZ        = NE_CH*4     ; bytes per matrix data array (4 bytes per entry)
 VSZ        = NE_CH*2     ; bytes per VOFS data array
-TBL_MAXLATE = 2          ; ...but never more than this many frames running
-TBL_BUDGET = 189         ; frame load (lines) above which a table rebuild waits a frame
+TBL_MAXLATE = TBLML          ; ...but never more than this many frames running
+.ifndef PROFHOT
+PROFHOT = 251
+.endif
+TBL_BUDGET = TBLB         ; frame load (lines) above which a table rebuild waits a frame
 ITSZ       = 164         ; bytes per indirect HDMA table
 
+.ifndef TBLB
+TBLB = 200
+.endif
+.ifndef TBLML
+TBLML = 2
+.endif
 .macro CHK n
 .ifdef DBGMARK
   php
@@ -204,11 +213,11 @@ ct_c3:    .res 2
 ct_yd:    .res 2
 ct_xd:    .res 2
 tmpw:     .res 2
-profmax:  .res 96
-profcur:  .res 96
+profmax:  .res 130
+profcur:  .res 130
 profprev: .res 2
 profsum:  .res 192
-profhot:  .res 96
+profhot:  .res 130
 profhot_n: .res 2
 rowbuf:   .res 64
 digbuf:   .res 16
@@ -216,6 +225,14 @@ hist_lx:  .res NHIST*2
 hist_ly:  .res NHIST*2
 hist_rx:  .res NHIST*2
 hist_ry:  .res NHIST*2
+tc_lx:    .res NHIST*2      ; v1.1: contrail screen cache + per-frame deltas
+tc_ly:    .res NHIST*2
+tc_rx:    .res NHIST*2
+tc_ry:    .res NHIST*2
+td_lx:    .res NHIST*2
+td_ly:    .res NHIST*2
+td_rx:    .res NHIST*2
+td_ry:    .res NHIST*2
 cl_sx:    .res 32
 cl_sy:    .res 32
 cl_z:     .res 32
@@ -342,9 +359,12 @@ MainLoop:
   lda paused
   bne @nophys
 @ph:
+  jsl X_HitStop              ; v1.1: hit-stop (world frozen), stage switch
+  bcs @hs
   jsr Physics
   dec phys_n
   bne @ph
+@hs:
   jsr SfxFrame
   CHK 0
 @nophys:
@@ -379,7 +399,7 @@ MainLoop:
   jsr RowUpdate
   CHK 23
   jsr BuildFrame
-  lda #$0F
+  lda bright                 ; v1.1: stage fades (15 = full)
   sta inidisp
   lda #1
   sta c_flag
@@ -487,7 +507,7 @@ Profile:
   dec noprof
   rts
 : jsr LoadNow
-.if .defined(PROFX) .or .defined(RING)
+.ifdef RING
   pha
   lda loops
   and #$7FFF
@@ -497,11 +517,37 @@ Profile:
   sta f:$7F0000,x
 .endif
 .ifdef PROFX
-  cmp #251                  ; heavy frame: add its breakdown to profhot
+  pha
+  ldx #0
+  ldy #0
+@acc:
+  lda profcur,x
+  phx
+  tyx
+  clc
+  adc f:$7F4000,x
+  sta f:$7F4000,x
+  lda #0
+  adc f:$7F4002,x
+  sta f:$7F4002,x
+  plx
+  iny
+  iny
+  iny
+  iny
+  inx
+  inx
+  cpx #128
+  bne @acc
+  lda f:$7F4204
+  inc a
+  sta f:$7F4204
+  pla
+  cmp #PROFHOT               ; heavy frame: add its breakdown to profhot
   bcc @nh
   pha
   inc profhot_n
-  ldx #94
+  ldx #126
 @cp:
   lda profcur,x
   clc
@@ -512,6 +558,11 @@ Profile:
   bpl @cp
   pla
 @nh:
+  ldx #126
+: stz profcur,x
+  dex
+  dex
+  bpl :-
 .endif
   cmp maxline
   bcc :+
@@ -899,6 +950,7 @@ LoadView:
   sta COLDATA
   A16
 @done:
+  jsl X_ViewLoad             ; v1.1: stage palette / Mode 7 map / sky + haze tables
   ldx #30
 : lda #1
   sta cl_vis,x
@@ -1217,7 +1269,9 @@ NmiFast:
   bne :-
   stz hud_flag
 @nohud:
+  jsl X_Nmi                  ; v1.1: floating-number glyphs, scorched boss palette
   jsr BossNmi               ; boss palette / colour animation / sheet streaming
+  jsl X_Stream               ; v1.1: sprite-stack frames (jet / near enemies / ground props), line-budgeted
   ; hit flash: red fixed colour added over the picture (HDMA ch 7 table swap in perspective views)
   lda view
   cmp #VIEW_OVER
@@ -1240,7 +1294,7 @@ NmiFast:
   sta $4372
   bra @fdone
 @fp0:
-  lda #.loword(haze)
+  lda stg_hz                 ; v1.1: this stage's haze
   sta $4372
   A8
   lda #$01
@@ -2803,6 +2857,12 @@ BuildChase:
   jsr ProjectClouds
   CHK 2
   jsr ProjectObjects
+  jsl X_Props                ; v1.1: ground props on the Mode 7 plane
+.ifdef PROPX4
+  jsl X_Props
+  jsl X_Props
+  jsl X_Props
+.endif
   CHK 3
   ; objects + clouds in front of the jet
   jsr EmitFront
@@ -2824,17 +2884,7 @@ BuildChase:
   sta sy
   lda #1
   sta sbig
-  lda bankf
-  jsr Abs
-  asl
-  tax
-  lda f:ChaseJetTiles,x
-  sta stile
-  lda #$30
-  ldx bankf
-  bpl :+
-  ora #$40
-: sta sattr
+  jsl X_JetFrame             ; v1.1: sprite-stacked jet, frame streamed by the NMI
   jsr PutSpr
   ; afterburner
   lda boost
@@ -2869,13 +2919,12 @@ BuildChase:
 
 ; wingtip contrails: 2 x 7 dots trailing toward the camera
 ChaseTrails:
-  lda bankf
-  jsr Abs
+  lda js_want               ; v1.1: wingtips of the streamed jet frame
   asl
   asl
   asl
   tax                       ; 8 bytes per frame entry: LX LY RX RY
-  lda bankf
+  lda turnrate
   bmi @flip
   lda f:WingTips,x
   sta t0
@@ -3497,6 +3546,7 @@ BuildOver:
   CHK 1
   jsr OverCoefs
   jsr ProjectOver
+  CHK 24
   ldy #0
   jsr EmitObjs
   ldy #2
@@ -3627,19 +3677,70 @@ BuildOver:
   stz sbig
   lda #T_OVER_DOT
   sta stile
-  ldy #0
+  ; v1.1: half the points are rotated each frame (alternating); the others move by their
+  ; neighbour's screen delta (same rotation + scroll), the newest point is always exact
+  lda frame
+  and #1
+  asl
+  tay
 @tr:
   sty t7
-  lda hist_lx,y
-  jsr TrailDot
+  jsr TrailFresh
   ldy t7
-  lda hist_rx,y
-  jsr TrailDotR
-  ldy t7
+  iny
+  iny
   iny
   iny
   cpy #NHIST*2
-  bne @tr
+  bcc @tr
+  lda frame
+  and #1
+  asl
+  eor #2
+  tay
+@tr2:
+  sty t7
+  cpy hist_pos
+  bne :+
+  jsr TrailFresh
+  bra @tn
+: tya
+  eor #2
+  tax                       ; neighbour (fresh this frame)
+  lda tc_lx,y
+  clc
+  adc td_lx,x
+  sta tc_lx,y
+  sta sx
+  lda tc_ly,y
+  clc
+  adc td_ly,x
+  sta tc_ly,y
+  sta sy
+  jsr PutSpr
+  ldy t7
+  tya
+  eor #2
+  tax
+  lda tc_rx,y
+  clc
+  adc td_rx,x
+  sta tc_rx,y
+  sta sx
+  lda tc_ry,y
+  clc
+  adc td_ry,x
+  sta tc_ry,y
+  sta sy
+  jsr PutSpr
+@tn:
+  ldy t7
+  iny
+  iny
+  iny
+  iny
+  cpy #NHIST*2
+  bcc @tr2
   CHK 4
   ; jet shadow (palette 4 = half-transparent black)
   lda p_dead
@@ -3702,6 +3803,52 @@ BuildOver:
   rts
 
 ; A = world x (px) of a trail point; Y = history index
+; trail point Y exact: draw both dots, keep screen positions + their change since last time
+TrailFresh:
+  lda hist_lx,y
+  jsr TrailDot
+  ldy t7
+  lda sx
+  sec
+  sbc tc_lx,y
+  jsr TrailClamp
+  sta td_lx,y
+  lda sx
+  sta tc_lx,y
+  lda sy
+  sec
+  sbc tc_ly,y
+  jsr TrailClamp
+  sta td_ly,y
+  lda sy
+  sta tc_ly,y
+  lda hist_rx,y
+  jsr TrailDotR
+  ldy t7
+  lda sx
+  sec
+  sbc tc_rx,y
+  jsr TrailClamp
+  sta td_rx,y
+  lda sx
+  sta tc_rx,y
+  lda sy
+  sec
+  sbc tc_ry,y
+  jsr TrailClamp
+  sta td_ry,y
+  lda sy
+  sta tc_ry,y
+  rts
+; a jump of more than 12 px is a new point, not motion
+TrailClamp:
+  cmp #13
+  bcc @ok
+  cmp #.loword(-12)
+  bcs @ok
+  lda #0
+@ok:
+  rts
 TrailDot:
   sec
   sbc pospx
@@ -3739,6 +3886,7 @@ TrailCommon:
 .include "combat.s"
 .include "boss.s"
 .include "title.s"
+.include "v11.s"
 .include "../music/build/apu_upload.inc"
 
 ; =====================================================================
@@ -3760,11 +3908,7 @@ OverInv:  .incbin "../assets/overinv.bin"
 Bg3Tiles: .incbin "../assets/bg3tiles.bin"
 Bg3TilesEnd:
 MapBg3:   .incbin "../assets/map_bg3.bin"
-ChaseJetTiles: .word T_CHASE_JET0, T_CHASE_JET1, T_CHASE_JET2
 OverJetTiles:  .word T_OVER_JET0, T_OVER_JET1, T_OVER_JET2
-WingTips: .word WT0_LX, WT0_LY, WT0_RX, WT0_RY
-          .word WT1_LX, WT1_LY, WT1_RX, WT1_RY
-          .word WT2_LX, WT2_LY, WT2_RX, WT2_RY
 KSquare:  .word 0, 1, 4, 9, 16, 25, 36, 49
 BallTiles: .word T_COCK_BALL00, T_COCK_BALL01, T_COCK_BALL02
            .word T_COCK_BALL10, T_COCK_BALL11, T_COCK_BALL12
@@ -3809,7 +3953,7 @@ MapCock:  .incbin "../assets/map_cock.bin"
   .byte $00                       ; no SRAM
   .byte $01                       ; North America
   .byte $00                       ; developer
-  .byte $00                       ; version
+  .byte $01                       ; version (v1.1)
   .word $FFFF                     ; checksum complement (fixed by build)
   .word $0000                     ; checksum
 

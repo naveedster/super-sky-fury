@@ -1295,6 +1295,7 @@ RestartGame:
   lda row_dirty
   ora #RD_ALL
   sta row_dirty
+  jsl X_Restart              ; v1.1: back to stage 1
   rts
 
 ; once per built frame: shake offset + flash level for the NMI
@@ -1531,7 +1532,7 @@ RowWarn:
   rts
 : lda #3
   jsr RowFromMap
-  jsr BossWarnRow
+  jsl X_WarnRow              ; v1.1: boss warnings, then stage / power-up messages
   bcs :+
   lda warn_shown
   beq :+
@@ -1551,7 +1552,7 @@ RowSky:
   lda gameover
   bne :+
   lda t5
-  jsr BossSky
+  jsl X_SkyRow               ; v1.1: boss texts, then stage banners / power-up messages
   jmp @set
 : lda t5
   cmp #5

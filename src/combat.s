@@ -5,7 +5,7 @@
 ;  Turning rotates them, flying forward pulls them toward you.
 ; =====================================================================
 NEN = 6                     ; enemy slots
-NBU = 6                     ; bullet slots
+NBU = 6                     ; bullet slots (spread gun = lanes on the same round)
 NDE = 8                     ; debris slots
 NOB = 48                    ; projected sprite objects per frame
 ST_LIVE = 1
@@ -169,6 +169,7 @@ InitCombat:
   dex
   dex
   bpl @v
+  jsl X_GameInit             ; v1.1: stage 1, power-ups / combo / effects reset
   jsr ScoreText
   jmp InitAttack
 
@@ -236,6 +237,9 @@ CombatStep:
   jsr Waves
   CHK 12
   jsr MoveEnemies
+  CHK 44
+  jsl X_Step
+  CHK 45                 ; v1.1: new enemy types, power-ups, effects, bar, stages
   jsr EnemyFire
   CHK 13
   jsr MoveBullets
@@ -346,6 +350,7 @@ Weapons:
   sta bu_gx,x
   lda #SA_GUNL
 @snd:
+  jsl X_Spread               ; v1.1: spread gun = two more rounds
   ldx #1
   ldy #6
   jsr SfxA
@@ -401,7 +406,7 @@ Weapons:
   lda #96
   sta ms_vz
   stz ms_t
-  lda #45
+  lda ms_reload              ; v1.1: 45 frames, 16 with RAPID MISSILES
   sta ms_cd
   lda #SA_MSL
   ldx #3
@@ -452,7 +457,14 @@ Waves:
   bra @adv
 @nb:
   cmp #T_LOOP
+  beq @lp
+  cmp #T_STAGE               ; v1.1: next stage (fade, new world, banner)
   bne @spawn
+  jsl X_WaveStage
+  bcc @busy
+  ldx wave_pos
+  bra @adv
+@lp:
   stz wave_pos
   lda diff
   cmp #6
@@ -585,6 +597,7 @@ Spawn:
   clc
   adc t4
   sta en_spd,x
+  jsl X_SpawnInit            ; v1.1: hit points / hit box / new types
   rts
 
 ; ---------------------------------------------------------------- enemies
@@ -900,8 +913,8 @@ MoveMissile:
   cmp #14*16
   bcs @fly
   stz ms_st
-  lda #2
-  jmp KillEnemy
+  jsl X_MissileHit           ; v1.1: 6 damage, big flash, hit-stop, shake
+  rts
 @fly:
   lda ms_x
   clc
@@ -991,17 +1004,8 @@ Hits:
   bpl :+
   eor #$FFFF
   inc a
-: cmp #HIT_X
-  bcs @bn
-  lda #0
-  sta bu_d,y
-  phx
-  lda #1
-  CHK 24
-  jsr KillEnemy
-  CHK 25
-  plx
-  bra @en
+: jsl X_LaneHit              ; v1.1: lanes (spread gun) x per-type hit box -> damage / kill
+  bcs @en
 @bn:
   iny
   iny
@@ -1020,6 +1024,7 @@ Hits:
 KillEnemy:
   stx o_i
   sta o_f
+  jsl X_KillPtsL             ; v1.1: A = points (type x combo), score popup, big-kill juice
   clc
   adc score
   cmp #10000
@@ -1531,37 +1536,13 @@ ProjectObjects:
   lda en_st,x
   cmp #ST_BOOM
   beq @boom
-  lda en_pa,x               ; palette by type: red / olive camo / navy (graphics v1)
-  ora obj_pri
-  sta o_a
-  lda t1
-  cmp #82
-  bcs @m
-  lda en_hd,x               ; near: nose toward you or away
-  clc
-  adc #$4000
-  bmi :+
-  lda #F_EL_AWAY
+  jsl X_EnPal                ; v1.1: palette (white hit flash + jolt); bombers / fortress drawn there
+  bcc :+
+  jmp @en0
+: jsl X_EnFrame              ; v1.1: near / medium: sprite-stacked yaw frames
+  bcs :+
   jmp @add
-: lda #F_EL_TOW
-  jmp @add
-@m:
-  cmp #165
-  bcs @s
-  lda en_ty,x
-  cmp #T_CROSSR
-  beq @bk
-  cmp #T_CROSSL
-  bne @lv
-  lda o_a
-  ora #$40
-  sta o_a
-@bk:
-  lda #F_EM_BANK
-  bra @add
-@lv:
-  lda #F_EM
-  bra @add
+: lda t1
 @s:
   cmp #240
   bcs :+
@@ -1622,6 +1603,7 @@ ProjectObjects:
   beq :+
   jmp @e
 :
+  CHK 48
   ; ---- missile
   lda ms_st
   beq @nomsl
@@ -1646,6 +1628,7 @@ ProjectObjects:
   lda #0
   jsr TrailEmit
 @nomsl:
+  CHK 49
   ; ---- debris
   ldx #0
 @d:
@@ -1694,6 +1677,7 @@ ProjectObjects:
   beq @rf12260
   jmp @d
 @rf12260:
+  CHK 50
   ; ---- bullets
   ldx #0
 @b:
@@ -1710,14 +1694,7 @@ ProjectObjects:
   sta t2
   jsr Project
   bcc @bn0
-  lda obj_pri
-  sta o_a
-  lda t1
-  cmp #120
-  lda #F_BUL0
-  bcc :+
-  lda #F_BUL1
-: jsr AddObj
+  jsl X_BulDraw              ; v1.1: centre + spread lanes
 @bn0:
   ldx c_i
 @bn:
@@ -1725,6 +1702,7 @@ ProjectObjects:
   inx
   cpx #NBU*2
   bne @b
+  CHK 51
   ; ---- enemy tracers
   ldx #0
 @eb:
@@ -1780,6 +1758,7 @@ ProjectObjects:
   beq @rf51672
   jmp @eb
 @rf51672:
+  CHK 52
   ; ---- enemy missiles (exhaust flicker = h-flip)
   ldx #0
 @em:
@@ -1826,6 +1805,7 @@ ProjectObjects:
   beq @rf36188
   jmp @em
 @rf36188:
+  CHK 53
   ; ---- your own jet going down in flames
   lda p_dead
   cmp #DEAD_T-44
@@ -1854,6 +1834,9 @@ ProjectObjects:
   lda #F_X32B
 : jsr AddObj
 @nw:
+  CHK 46
+  jsl X_Project
+  CHK 47              ; v1.1: capsules, impact sparks, floating numbers
   jmp BossObjs
 
 ; overhead view: jet-relative coordinates map straight to the screen (the map turns with you)
@@ -1960,6 +1943,7 @@ ProjectOver:
   beq @rf54673
   jmp @e
 @rf54673:
+  CHK 8
   ldx #0
 @b:
   lda bu_d,x
@@ -1971,10 +1955,7 @@ ProjectOver:
   sta t1
   jsr ProjOver
   bcc @bn0
-  lda #$30
-  sta o_a
-  lda #F_BUL0
-  jsr AddObj
+  jsl X_BulDrawO
 @bn0:
   ldx c_i
 @bn:
@@ -1982,6 +1963,7 @@ ProjectOver:
   inx
   cpx #NBU*2
   bne @b
+  CHK 46
   ldx #0
 @d:
   lda de_t,x
@@ -2006,6 +1988,7 @@ ProjectOver:
   inx
   cpx #NDE*2
   bne @d
+  CHK 47
   lda ms_st
   beq @nm
   lda ms_x
@@ -2091,6 +2074,8 @@ ProjectOver:
   lda #F_X32B
 : jsr AddObj
 @nw:
+  CHK 25
+  jsl X_ProjOverExtra
   jmp BossObjs
 
 ; Y = band*2: emit that depth band's objects in the order they were projected
@@ -2115,14 +2100,47 @@ BandBase: .word 0, NOB*2, NOB*4, NOB*6
 
 ; Y = object index
 EmitOne:
+  lda ob_tl,y
+  and #$3000
+  bne @big0
+  ; v1.1 fast path: 16x16 fully addressable (x 0..247, y 0..223): two word stores, no high table
+  lda ob_sx,y
+  sec
+  sbc #8
+  cmp #248
+  bcs @sm
+  sta sx
+  lda ob_sy,y
+  sec
+  sbc #8
+  cmp #224
+  bcs @sm
+  xba
+  ora sx
+  ldx oam_idx
+  cpx #512
+  bcs @r
+  sta oam_lo,x
+  lda ob_at,y
+  and #$00FE
+  xba
+  sta m_t
+  lda ob_tl,y
+  and #$01FF
+  ora m_t
+  sta oam_lo+2,x
+  txa
+  clc
+  adc #4
+  sta oam_idx
+@r:
+  rts
+@sm:
   lda ob_at,y
   sta sattr
   lda ob_tl,y
   and #$01FF
   sta stile
-  lda ob_tl,y
-  and #$3000
-  bne @big
   lda ob_sx,y
   sec
   sbc #8
@@ -2133,8 +2151,13 @@ EmitOne:
   sta sy
   stz sbig
   jmp PutSpr
-@big:
+@big0:
   sta t5
+  lda ob_at,y
+  sta sattr
+  lda ob_tl,y
+  and #$01FF
+  sta stile
   lda ob_sx,y
   sec
   sbc #16
@@ -2163,6 +2186,89 @@ EmitOne:
 
 ; one 2x2 metasprite: sx, sy top-left, stile, sattr (flips honoured), q_p piece px, q_dx/q_dy tile steps
 PutQuad:
+  ; v1.1 fast path: 16 px pieces, all four on screen with x < 256: 8 word stores, no high table
+  lda q_p
+  cmp #16
+  bne @sl
+  lda sx
+  cmp #225
+  bcs @sl
+  lda sy
+  cmp #193
+  bcs @sl
+  ldx oam_idx
+  cpx #512-15
+  bcc @fast
+@sl:
+  jmp @slow
+@fast:
+  stz t4
+  lda sattr
+  and #$40
+  beq :+
+  lda q_dx
+  sta t4
+: stz t5
+  lda sattr
+  and #$80
+  beq :+
+  lda q_dy
+  sta t5
+: lda sattr
+  and #$00FE
+  xba
+  sta m_t
+  lda q_dx
+  sec
+  sbc t4
+  sta q_x                   ; (dx - left)
+  lda q_dy
+  sec
+  sbc t5
+  sta q_y                   ; (dy - top)
+  lda sy
+  xba
+  ora sx
+  sta q_xy
+  sta oam_lo,x              ; top-left
+  clc
+  adc #16
+  sta oam_lo+4,x            ; top-right
+  adc #$1000
+  sta oam_lo+8,x            ; bottom-right
+  sec
+  sbc #16
+  sta oam_lo+12,x           ; bottom-left
+  lda stile
+  clc
+  adc t4
+  adc t5
+  ora m_t
+  sta oam_lo+2,x
+  lda stile
+  clc
+  adc q_x
+  adc t5
+  ora m_t
+  sta oam_lo+6,x
+  lda stile
+  clc
+  adc q_x
+  adc q_y
+  ora m_t
+  sta oam_lo+10,x
+  lda stile
+  clc
+  adc t4
+  adc q_y
+  ora m_t
+  sta oam_lo+14,x
+  txa
+  clc
+  adc #16
+  sta oam_idx
+  rts
+@slow:
   lda sx
   sta q_x
   lda sy
@@ -2228,41 +2334,7 @@ PutQuad:
 ; ---------------------------------------------------------------- data
 ; overhead enemy facing: low byte = frame, high byte bits 6-7 = h/v flip
 TopDirs: .word F_TOP0, F_TOP1, F_TOP2, F_TOP1|$8000, F_TOP0|$8000, F_TOP1|$C000, F_TOP2|$4000, F_TOP1|$4000
-; type (| AR_GUN fires tracers, | AR_MSL carries a missile), x px, z px, weave, frames to the next entry
-G = AR_GUN
-M = AR_MSL
-WaveData:
-  ; 1: three gunners head-on
-  .word T_HEAD|G,   0, 900, 0, 24
-  .word T_HEAD|G, .loword(-60), 900, 0, 24
-  .word T_HEAD|G,  60, 900, 0, 0
-  .word T_WAIT, 0, 0, 0, 60
-  ; 2: crossers
-  .word T_CROSSR, .loword(-480), 380, 0, 50
-  .word T_CROSSL, 480, 470, 0, 50
-  .word T_CROSSR, .loword(-480), 300, 0, 0
-  .word T_WAIT, 0, 0, 0, 60
-  ; 3: overtakers, then one sits on your tail and lets a missile go (afterburner / hard bank!)
-  .word T_OVER, .loword(-30), .loword(-110), 8, 45
-  .word T_OVER, 30, .loword(-110), 8, 60
-  .word T_TAIL|M, .loword(-40), .loword(-175), 0, 0
-  .word T_WAIT, 0, 0, 0, 60
-  ; 4: weaving gunners and a swooping missile carrier
-  .word T_HEAD|G, .loword(-90), 950, 14, 0
-  .word T_HEAD|G,  90, 950, 14, 30
-  .word T_SWOOP|G|M,  0, 950, 0, 30
-  .word T_HEAD|G,   0, 1050, 22, 0
-  .word T_WAIT, 0, 0, 0, 60
-  ; 5: everything at once
-  .word T_OVER,  26, .loword(-110), 10, 30
-  .word T_CROSSL, 480, 420, 0, 30
-  .word T_CROSSR, .loword(-480), 340, 0, 40
-  .word T_HEAD|G|M,   0, 1000, 18, 30
-  .word T_TAIL|M, 40, .loword(-175), 0, 0
-  .word T_WAIT, 0, 0, 0, 90
-WaveBoss:
-  .word T_BOSS, 0, 0, 0, 30
-  .word T_LOOP, 0, 0, 0, 0
+; (v1.1: the wave script moved to src/v11.s, per stage)
 
 .include "attack.s"
 .include "../assets/texts.inc"

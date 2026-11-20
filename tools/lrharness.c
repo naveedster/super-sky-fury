@@ -148,6 +148,28 @@ int main(int argc, char **argv) {
         return 0;
       }
     }
+    { /* BOT=st,x,z (hex WRAM addrs of en_st/en_x/en_z): from frame BOTFROM, steer at the nearest live enemy, fire */
+      static int bi = -1; static unsigned bst, bx, bz, bfrom; static unsigned char *bram; static unsigned base;
+      if (bi < 0) { bi = 0; const char *b = getenv("BOT"); if (b) { bi = 1; sscanf(b, "%x,%x,%x", &bst, &bx, &bz);
+        bfrom = getenv("BOTFROM") ? atoi(getenv("BOTFROM")) : 0; void *(*g)(unsigned) = dlsym(h, "retro_get_memory_data"); bram = g(RETRO_MEMORY_SYSTEM_RAM); } }
+      if (bi == 1 && fr == bfrom) base = held;
+      if (bi == 1 && !bram) { void *(*g2)(unsigned) = dlsym(h, "retro_get_memory_data"); bram = g2(RETRO_MEMORY_SYSTEM_RAM); }
+      if (bi == 1 && bram && fr >= bfrom) {
+        int best = -1, bd = 1 << 30;
+        for (int i = 0; i < 6; i++) {
+          short st = bram[bst+2*i] | bram[bst+2*i+1] << 8; short x = bram[bx+2*i] | bram[bx+2*i+1] << 8; short z = bram[bz+2*i] | bram[bz+2*i+1] << 8;
+          if (st != 1 || z < 0) continue;
+          if (z < bd) { bd = z; best = x; }
+        }
+        { static int pi = -1; static unsigned pt, px, pz; if (pi < 0) { pi = 0; const char *q = getenv("BOTPU"); if (q) { pi = 1; sscanf(q, "%x,%x,%x", &pt, &px, &pz); } }
+          if (pi == 1) for (int i = 0; i < 2; i++) {
+            short t = bram[pt+2*i] | bram[pt+2*i+1] << 8; short x = bram[px+2*i] | bram[px+2*i+1] << 8; short z = bram[pz+2*i] | bram[pz+2*i+1] << 8;
+            if (t > 0 && z > -100) { bd = z; best = x; break; }
+          } }
+        held = (base & ~((1u<<6)|(1u<<7))) | (1u<<1);
+        if (bd != 1 << 30) { if (best < -40) held |= 1u<<6; else if (best > 40) held |= 1u<<7; if ((fr & 63) == 0) held |= 1u<<8; }
+      }
+    }
     retro_run();
     { static FILE *tf; static unsigned ta[64]; static int tn = -1; static unsigned char *tram;
       if (tn < 0) { tn = 0; const char *tr = getenv("TRACE"), *to = getenv("TRACEOUT");

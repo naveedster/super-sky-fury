@@ -71,7 +71,7 @@ footer .dev{color:var(--gold)}
   <div class="banner">SUPER</div>
   <h1>SKY FURY</h1>
   <div class="dev">DEVELOPED BY NAVEED FARBAKHSH</div>
-  <p class="pitch">An original Mode 7 jet-combat shooter for the Super Nintendo. Fly over an endless sea of islands, dogfight enemy waves, dodge heat-seeking missiles, and take down a giant robot boss, all with a wide stereo soundtrack. Play it right here, or download the ROM for real hardware.</p>
+  <p class="pitch">An original Mode 7 jet-combat shooter for the Super Nintendo. Fly over an endless sea of islands, dogfight enemy waves across four stages, dodge heat-seeking missiles, and take down a giant robot boss, all with a wide stereo soundtrack. Play it right here, or download the ROM for real hardware.</p>
   <div class="btns">
     <a class="btn" href="#play">▶ PLAY NOW</a>
     <a class="btn alt" href="rom/super_sky_fury.sfc" download="super_sky_fury.sfc">⬇ DOWNLOAD ROM</a>
@@ -105,10 +105,14 @@ footer .dev{color:var(--gold)}
   <h2>🖼 SCREENSHOTS</h2>
   <div class="grid">
     <img src="screenshots/title_menu.png" alt="Title screen with START GAME, OPTIONS, CREDITS menu" loading="lazy" width="512" height="448">
-    <img src="screenshots/gameplay_chase.png" alt="Chase view over islands" loading="lazy" width="512" height="448">
-    <img src="screenshots/gameplay_boss.png" alt="Giant robot boss fight" loading="lazy" width="512" height="448">
-    <img src="screenshots/gameplay_cockpit.png" alt="Cockpit view with instruments" loading="lazy" width="512" height="448">
-    <img src="screenshots/gameplay_overhead.png" alt="Overhead view" loading="lazy" width="512" height="448">
+    <img src="screenshots/gameplay_chase.png?v=1.1" alt="Chase view over islands" loading="lazy" width="512" height="448">
+    <img src="screenshots/gameplay_boss.png?v=1.1" alt="Giant robot boss fight" loading="lazy" width="512" height="448">
+    <img src="screenshots/gameplay_cockpit.png?v=1.1" alt="Cockpit view with instruments" loading="lazy" width="512" height="448">
+    <img src="screenshots/gameplay_overhead.png?v=1.1" alt="Overhead view" loading="lazy" width="512" height="448">
+    <img src="screenshots/stage_desert.png?v=1.1" alt="Stage 2: Desert Storm" loading="lazy" width="512" height="448">
+    <img src="screenshots/stage_arctic.png?v=1.1" alt="Stage 3: Arctic Front" loading="lazy" width="512" height="448">
+    <img src="screenshots/stage_night.png?v=1.1" alt="Stage 4: Night Raid" loading="lazy" width="512" height="448">
+    <img src="screenshots/fortress.png?v=1.1" alt="Sky fortress mid-boss" loading="lazy" width="512" height="448">
     <img src="screenshots/title_options.png" alt="Options: difficulty, stereo or mono, music and sound test" loading="lazy" width="512" height="448">
   </div>
 
@@ -116,6 +120,10 @@ footer .dev{color:var(--gold)}
   <ul class="feat">
     <li><b>Three camera views:</b> chase, cockpit with working instruments, and overhead, using per-scanline Mode 7 perspective.</li>
     <li><b>Real combat:</b> twin cannons, lock-on missiles, an afterburner, hard banking, and enemies that shoot back.</li>
+    <li><b>Four stages:</b> ocean, desert, arctic, and a night raid, each with its own ground and sky, plus a sky fortress mid-boss.</li>
+    <li><b>Power-ups and combos:</b> spread gun, rapid missiles, shields, and a kill combo multiplier.</li>
+    <li><b>Hits you can feel:</b> sparks, flashes, hit-stop, floating damage numbers, and a boss bar that shows every hit.</li>
+    <li><b>Sprite-stacked 3D sprites:</b> voxel-model jets, enemies, and ground targets drawn at 16 headings and streamed to VRAM.</li>
     <li><b>Giant boss:</b> weak points, three attack phases, and its own theme.</li>
     <li><b>Stereo sound:</b> an original 16-bit score with hard-panned, moving SFX on a custom SPC700 driver, plus a mono option.</li>
     <li><b>Three difficulties:</b> EASY with 7 lives, NORMAL with 5, HARD with 3, each changing boss health and enemy fire rate.</li>
@@ -138,7 +146,7 @@ footer .dev{color:var(--gold)}
     window.EJS_player='#game';
     window.EJS_core='snes';
     window.EJS_gameName='Super Sky Fury';
-    window.EJS_gameUrl='rom/super_sky_fury.sfc';
+    window.EJS_gameUrl='rom/super_sky_fury.sfc?v=1.1';
     window.EJS_pathtodata='https://cdn.emulatorjs.org/stable/data/';
     window.EJS_startOnLoaded=true;
     window.EJS_color='#ff9a1f';

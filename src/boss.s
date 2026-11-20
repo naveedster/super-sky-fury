@@ -1276,6 +1276,9 @@ BossHits:
   stx b_fe
 @dmg:
   sta t0
+  sta v_dmg
+  lda bu_x,y
+  sta v_hx
   lda #0
   sta bu_d,y
   phy
@@ -1292,6 +1295,7 @@ BossHits:
   ldy #12
   jsr SfxA
   jsr BossBar
+  jsl X_BossHitFx            ; v1.1: spark at the hit, damage counter, jolt
   ply
   bra @bn
 @body:
@@ -1351,6 +1355,7 @@ BossMissileHit:
   ldx #3
   ldy #58
   jsr SfxB
+  jsl X_BossMslFx            ; v1.1: big flash, hit-stop, shake, bar flash
   jmp BossBar
 
 ; health bar: redraw when the segment count changes
@@ -1492,6 +1497,7 @@ BossProj:
   tax
   lda f:RecipTab,x
   sta t5
+  sta b_rcp                  ; v1.1: scale, for hit sparks
   lda b_h
   ASR4
   eor #$FFFF
@@ -1505,6 +1511,8 @@ BossProj:
   jsr ScaleR
   clc
   adc #128
+  clc
+  adc b_jit                  ; v1.1: hit jolt
   sta b_sx
   sec
   rts
@@ -2394,41 +2402,7 @@ RowBoss:
   bne :+
   lda #4
 : jsr RowFromMap
-  lda b_st
-  cmp #BS_ENTER
-  bcc @set
-  cmp #BS_DYING
-  bcs @set
-  ldy #.loword(TX_BOSS)
-  lda #$3800
-  ldx #8
-  jsr PutTxt
-  jsr BossSegs
-  sta b_seg
-  sta t0
-  ldx #26
-@b:
-  lda t0
-  beq @e0
-  cmp #2
-  bcc @e1
-  sbc #2
-  sta t0
-  lda #T_BAR2
-  bra @put
-@e1:
-  stz t0
-  lda #T_BAR1
-  bra @put
-@e0:
-  lda #T_BAR0
-@put:
-  ora #$3800
-  sta rowbuf,x
-  inx
-  inx
-  cpx #26+24
-  bne @b
+  jsl X_BossRow              ; v1.1: boss / fortress bar with the draining "recent damage" part
 @set:
   lda #1
   sta row_flag
