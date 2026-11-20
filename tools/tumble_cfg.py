@@ -19,7 +19,26 @@ MODEL = {"DEB0": "deb0", "DEB1": "deb1", "MSL": "msl", "EMSL": "emsl", "PU_P": "
          "BSHARD": "shard"}
 OUTL = {"frame": 1, "jet": 1, "hud": 8, "boss": 1}
 
+def plasma_frames():
+    """v1.3: the boss's spin-ring rounds / charge swirl: a blue plasma bolt (white core, flickering spikes)"""
+    out = []
+    yy, xx = np.mgrid[0:16, 0:16]
+    dx, dy = xx - 7.5, yy - 7.5
+    r = np.hypot(dx, dy); th = np.arctan2(dy, dx)
+    for k in range(NTF):
+        a = 2 * math.pi * k / NTF
+        spikes = 1.2 * np.maximum(0, np.cos(4 * (th - a / 2))) ** 3 + 0.6 * np.maximum(0, np.cos(3 * (th + a))) ** 4
+        R = 4.0 + 0.5 * math.sin(a * 2) + spikes * 2.4
+        g = np.zeros((16, 16), np.uint8)
+        g[r < R + 0.7] = 11
+        g[r < R * 0.80] = 12
+        g[r < 3.2] = 8
+        g[r < 2.0] = 9
+        out.append(g)
+    return out
+
 def tumble_frames(models, name):
+    if name == "BSHARD": return plasma_frames()
     pal, ramps = TUMBLE[name]
     v = models[MODEL[name]]
     out = []

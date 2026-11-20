@@ -23,7 +23,7 @@ K_BOSS   = 5                  ; SFX follows the boss
 K_BEAM   = 6                  ; SFX follows the chest beam's sweep
 T_BIGBOOM = 7                 ; en_ty of a boss explosion (always the big fireball frames)
 BZ_CAM   = 260                ; boss distance from the camera (px): same scale in chase + cockpit
-EYE_DH   = 31                 ; eyes above the chest gem (world px)
+EYE_DH   = 68                 ; eyes above the chest gem (world px; v1.3: the taller robot, 42 px on screen)
 BH_REST  = -16                ; rest height of the gem relative to you (px): below you, eyes above
 WARN_T   = 200
 ENTER_T  = 168
@@ -117,6 +117,12 @@ mu_ff:   .res 2               ; frames left holding $FF on port 0 (victory jingl
 mu_dead: .res 2
 mu_stamp: .res 2
 bd_offl:  .res 2           ; BossDraw scratch
+bo_back:  .res 2           ; BossOrbs scratch
+bo_rx:    .res 2
+bo_ry:    .res 2
+bo_dy:    .res 2
+bo_a:     .res 2
+bo_n:     .res 2
 bd_offr:  .res 2
 bd_atr:   .res 2
 bd_dx:    .res 2
@@ -679,13 +685,12 @@ BossBob:
   cmp #$8000
   ror
   sta t2
-  lda frame
-  asl
+  lda frame                  ; v1.3: slow heavy bob, +-8 px over 4 s
   asl
   and #$01FE
   tax
   lda f:SinTab,x
-  ldx #80                    ; +-5 px bob
+  ldx #128
   jsr MulB
   clc
   adc t2
@@ -859,11 +864,11 @@ AtkCannon:
   jmp @r
 @rf8403:
 @fire:
-  ; muzzle: 58 px out to that side, 8 px below the gem
-  lda #.loword(-58*16)
+  ; muzzle: the wrist blaster, 85 px out to that side, 23 px below the gem (v1.3 robot)
+  lda #.loword(-85*16)
   ldx b_side
   beq :+
-  lda #58*16
+  lda #85*16
 : sta t5
   clc
   adc b_x
@@ -872,7 +877,7 @@ AtkCannon:
   sta fe_z
   lda b_h
   sec
-  sbc #8*16
+  sbc #23*16
   sta fe_h
   lda #6
   sta b_mf
@@ -978,14 +983,14 @@ AtkVolley:
   dec b_n
   lda #1
   sta em_st,y
-  lda #.loword(-49*16)
+  lda #.loword(-67*16)        ; v1.3: missile pods on the backs of the shoulder pads
   ldx b_n
   txa
   and #1
   beq :+
-  lda #49*16
+  lda #67*16
   bra :++
-: lda #.loword(-49*16)
+: lda #.loword(-67*16)
 : clc
   adc b_x
   sta em_x,y
@@ -993,7 +998,7 @@ AtkVolley:
   sta em_z,y
   lda b_h
   clc
-  adc #18*16
+  adc #55*16
   sta em_h,y
   lda #0
   sta em_t,y
@@ -1107,8 +1112,9 @@ AtkBeam:
 @r:
   rts
 
-; crest shard burst: the crest flashes, then a ring of 8 shards flies out at you. The ring closes on
-; you at ~34 px radius: hold your line and they pass around you (and whizz past your ears).
+; v1.3 spin: arms out, eyes glare, he whirls round (head and arms swing, a ring of plasma orbits his waist),
+; then a ring of 8 plasma rounds flies out at you from his chest. The ring closes on you at ~34 px radius:
+; hold your line and they pass around you (and whizz past your ears).
 ShardCos: .word 34, 24, 0, .loword(-24), .loword(-34), .loword(-24), 0, 24
 ShardSin: .word 0, 24, 34, 24, 0, .loword(-24), .loword(-34), .loword(-24)
 AtkShard:
@@ -1117,9 +1123,14 @@ AtkShard:
   cmp #1
   bne :+
   lda #30
-  sta b_fe                   ; eyes / crest glare
-  rts
-: cmp #30
+  sta b_fe                   ; eyes glare
+  lda #K_BOSS
+  sta sfx_nk
+  lda #SA_CHARGE             ; the spin winds up
+  ldx #3
+  ldy #40
+  jmp SfxA
+: cmp #46
   beq @go
   cmp #90
   bcc @r
@@ -1135,9 +1146,7 @@ AtkShard:
   sta fe_x
   lda b_z
   sta fe_z
-  lda b_h
-  clc
-  adc #52*16                 ; crest
+  lda b_h                    ; from the chest
   sta fe_h
   lda #1
   sta fe_k
@@ -1299,9 +1308,9 @@ BossHits:
   cmp #60
   bcs @bn
   lda t5
-  cmp #.loword(-65)
+  cmp #.loword(-130)
   bmi @bn
-  cmp #140
+  cmp #200                   ; v1.3: the taller robot (crest .. feet)
   bpl @bn
   lda #0
   sta bu_d,y
@@ -1729,7 +1738,14 @@ BossDraw:
   clc
   adc b_sx
   sta b_sx
-: jsl X_BossDraw            ; v1.2: sprite-stacked part groups (v11.s)
+: lda #0
+  jsr BossOrbs               ; v1.3: blue energy in front of him
+  .ifndef NOBOSSDRAW
+  jsl X_BossDraw
+  .endif
+  ; v1.3: pre-rendered part groups (v11.s)
+  lda #1
+  jsr BossOrbs               ; ... and behind him
 @rf97377:
   ; thrusters under the boots (cloud palette: orange / yellow)
   lda frame
@@ -1751,18 +1767,27 @@ BossDraw:
   lda obj_pri
   ora #$02
   sta sattr
-  lda b_sy
+  lda #BOSS_FOOT_Y_CHASE-6
+  ldx #.loword(BOSS_FOOT_X_CHASE-8)
+  ldy view
+  cpy #VIEW_COCK
+  bne :+
+  lda #BOSS_FOOT_Y_COCK-6
+  ldx #.loword(BOSS_FOOT_X_COCK-8)
+: stx t6
   clc
-  adc #85
+  adc b_sy
   sta sy
   lda b_sx
-  sec
-  sbc #19
+  clc
+  adc t6
   sta sx
   jsr BossSpr
-  lda b_sx
+  lda #.loword(-16)
+  sec
+  sbc t6
   clc
-  adc #3
+  adc b_sx
   sta sx
   lda sattr
   ora #$40
@@ -1813,6 +1838,118 @@ BossPut:
   rts
 
 ; 16x16 piece: sx/sy top-left (signed), stile, sattr. Skipped if fully off screen.
+;
+; v1.3 blue energy: the beam charge swirl (6 plasma orbs spiral into the gem) and the spin ring (8 orbs
+; orbiting his waist; the near half drawn in front of him, the far half behind). A = 0 front pass, 1 back.
+BossOrbs:
+.ifdef NOORBS
+  rts
+.endif
+  sta bo_back
+  lda #T_CHASE_BSHARD
+  ldx view
+  cpx #VIEW_COCK
+  bne :+
+  lda #T_COCK_BSHARD
+: sta stile
+  lda obj_pri
+  ora #$0E
+  sta sattr
+  lda b_atk
+  cmp #ATK_BEAM
+  bne @spin
+  lda bm_on
+  cmp #1
+  bne @r
+  lda bo_back
+  bne @r
+  lda b_at                   ; radius level 0..15 (101 .. 11 px) as the charge builds
+  lsr
+  lsr
+  cmp #16
+  bcc :+
+  lda #15
+: xba
+  lsr                        ; * 128 bytes per level
+  sta bo_dy
+  lda b_at
+  sta bo_a
+  lda #6
+  sta bo_n
+@sw:
+  lda bo_a
+  and #31
+  asl
+  asl
+  clc
+  adc bo_dy
+  tax
+  jsr OrbTab
+  lda bo_a
+  clc
+  adc #5
+  sta bo_a
+  dec bo_n
+  bne @sw
+  lda #$80
+  tsb tb_bld
+@r:
+  rts
+@spin:
+  cmp #ATK_SHARD
+  bne @r
+  lda b_at
+  cmp #8
+  bcc @r
+  cmp #72
+  bcs @r
+  sta bo_a                   ; a sixteenth of a turn per frame
+  lda #8
+  sta bo_n
+@sp:
+  lda bo_a                   ; angles 0..7 (sin >= 0): the near half
+  and #8
+  beq :+
+  lda #1
+: cmp bo_back
+  bne :+
+  lda bo_a
+  and #15
+  asl
+  asl
+  tax
+  jsr OrbSpin
+: lda bo_a
+  clc
+  adc #2
+  sta bo_a
+  dec bo_n
+  bne @sp
+  lda #$80
+  tsb tb_bld
+  rts
+
+OrbTab:                      ; one swirl orb: X = SwirlTab byte offset
+  lda f:SwirlTab,x
+  clc
+  adc b_sx
+  sta sx
+  lda f:SwirlTab+2,x
+  clc
+  adc b_sy
+  sta sy
+  jmp BossSpr
+OrbSpin:                     ; one spin-ring orb: X = SpinTab byte offset
+  lda f:SpinTab,x
+  clc
+  adc b_sx
+  sta sx
+  lda f:SpinTab+2,x
+  clc
+  adc b_sy
+  sta sy
+  jmp BossSpr
+
 BossSpr:
   lda sy
   clc

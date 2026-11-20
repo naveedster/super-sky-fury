@@ -9,6 +9,45 @@ that name. The public overview is in the [README](../README.md).
 > They are excluded by `.gitignore` and are not in the repository. The release ROM is
 > `dist/super_sky_fury.sfc`. Current music renders are `music/{title,stage,boss,boss_victory}.{mp3,spc}`.
 
+## v1.3: reference-matched boss
+
+**Model.** `tools/boss_rt.py` replaces the voxel boss with an analytic model (convex hulls,
+ellipsoids, tapered prisms) that is raytraced offline. Materials are white armour, cobalt, dark
+joints, grey ribs, red gem and eyes, and green knee nodes. Lighting uses a cool key and ambient, a
+warm orange rim, Blinn-Phong specular, and a little floor bounce. It is supersampled, then
+quantized with ordered dither to the 15-colour boss palette (colours 13 and 14 are the animated
+eyes and gem). The camera sits low, so the boss towers over the player. Frames: body, damaged body
+(scorch and holes at fixed screen spots, mirrored from the clean half), head at 5 yaws, and arms
+in down, cannon, and spread poses. Renders are cached in `build/boss_rt_<hash>.pkl` (a cold build
+takes about 3 minutes). The cockpit view uses a 0.8 scale and fewer head yaws to fit its sheet.
+
+**Drawing.** `gen_assets.py` writes `BPIdx` entries of 16 bytes (offset, count, fast bounds, first
+row dy, rows, `BPRows` offset) and bakes priority into each `BPData` entry per view. When neither
+cannon is firing, the body and both arms come from one combined list (`CmbTab`, `BP_CMB`), so
+`X_BossDraw` runs 3 passes instead of 5. Each pass finds the first visible row and the first row
+past the bottom edge from `BPRows` and copies them with an unrolled loop (up to 96 sprites).
+Cells with 10 or fewer opaque pixels are dropped. Chase sheet: 69 cells (20 tiles free); cockpit:
+33 cells (12 free).
+
+**Effects.** `BossOrbs` draws the beam charge swirl and the spin ring from precomputed `SwirlTab`
+and `SpinTab` positions, split into back and front passes around the body. The `BSHARD` tumbling
+object is now an 8-frame blue plasma orb (`tumble_cfg.plasma_frames`). The spin attack charges
+(SA_CHARGE), then fires the ring from the chest. Muzzle and pod positions, `EYE_DH` (68), and the
+body hit range (-130..200) were updated for the taller model; HP and weak points are unchanged.
+
+**Performance (v1.3 vs v1.2).** `progress/v13/bossbench.sh` runs a RING SKIPTITLE AUTOPILOT build,
+warps to the boss, and records 4 shifted runs over frames 700-3600 (11600 frames):
+
+| Build | over 262 | over 250 | p99 | mean | max |
+|---|---|---|---|---|---|
+| v1.2 | 4 | 33 | 236 | 140.3 | 287 |
+| v1.3 | 1 | 25 | 234 | 140.8 | 265 |
+
+Stage runs (rcm.sh sa0, K=6) are identical to v1.2.
+
+**Verification.** `tools/dev/boss_win_rel.txt` (the boss_win replay with title-menu timing)
+reaches MISSION COMPLETE with the release ROM on snes9x, snes9x 1.55 (Delta), and Mesen-S.
+
 ## v1.2: more sprite stacking
 
 **Boss.** `tools/boss_vox.py` rebuilds the `boss_art.py` parts as voxels. Each part is extruded
@@ -60,7 +99,7 @@ counts. Each hit gives a spark and a K_FIX-panned tink. The third hit sets the p
 **Night.** The stage-4 CGRAM image darkens OBJ palettes 0, 3, 6, and 7 (x0.55 R, x0.62 G,
 x0.8 B). Lamp, flame, window, and HUD colours keep their values.
 
-**ROM.** The ROM is now 1 MB (header $0A, version $02), and banks $90-$95 are used.
+**ROM.** The ROM is now 1 MB (header $0A, version $02; v1.3: $03), and banks $90-$95 are used.
 
 **Performance (v1.2 vs v1.1).** The ring harness (`progress/v12/rcm.sh`) runs a RING SKIPTITLE
 build over 18 input shifts of each stress script. "Over 262" and "over 250" are frame counts

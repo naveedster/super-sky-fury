@@ -2915,6 +2915,7 @@ BuildChase:
   CHK 7
   ; behind the jet: interleave objects and clouds by depth bands
   jsr EmitBack
+  CHK 40
   jsr BossDraw
   CHK 4
   jsr PerspCommon
@@ -3957,7 +3958,7 @@ MapCock:  .incbin "../assets/map_cock.bin"
   .byte $00                       ; no SRAM
   .byte $01                       ; North America
   .byte $00                       ; developer
-  .byte $02                       ; version (v1.2)
+  .byte $03                       ; version (v1.3)
   .word $FFFF                     ; checksum complement (fixed by build)
   .word $0000                     ; checksum
 

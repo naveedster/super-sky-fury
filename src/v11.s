@@ -188,10 +188,13 @@ pr_dbb:  .res 2
 .endif
 tb_pc:   .res 2             ; ... with these sets drawn
 bp_n:    .res 2             ; (X_BossDraw scratch)
+bp_d:    .res 2
+bd_vo:   .res 2
+bp_e:    .res 2             ; part loop end (5, or 3 with a merged body + arms list)             ; 0 chase, BPIdx_cock-BPIdx_chase in the cockpit
 bp_sx:   .res 2
 bp_sy:   .res 2
 bp_k:    .res 2
-bp_l:    .res 4
+bp_l:    .res 8
 
 ; ---------------------------------------------------------------- bank-0 trampolines
 .segment "CODE"
@@ -2335,12 +2338,20 @@ X_Nmi:
   sta CGADD
   A16
   ldx #0
-: lda f:BossPal,x           ; 3/4 brightness
+: lda f:BossPal,x           ; 7/8 brightness (v1.3: keep the white armour reading white)
   lsr
   and #$3DEF
   sta n_t
   lsr
   and #$1CE7
+  clc
+  adc n_t
+  sta n_t
+  lda f:BossPal,x
+  lsr
+  lsr
+  lsr
+  and #$0C63
   clc
   adc n_t
   A8
@@ -4011,10 +4022,19 @@ SS_Line:
 ; The robot is drawn as 4 part frames from tools/boss_vox.py (OAM lists in boss_parts.inc), front to back:
 ; head + crest (5 yaws, turns to track you), left arm, right arm (down / cannon / spread), body (clean /
 ; battle-damaged below 1/3 health). Occlusion between the parts is baked into the frames.
+.segment "BOSSB"                 ; v1.3: the part lists live in their own bank (read with long loads)
 .include "../assets/boss_parts.inc"
+.segment "XCODE"
 BP_HEAD0 = 4
 BP_ARM   = 7
+BP_CMB   = 13                ; v1.3: merged body + arms lists (combo * 2 + damaged)
 X_BossDraw:
+  lda #0
+  ldx view
+  cpx #VIEW_COCK
+  bne :+
+  lda #BPIdx_cock-BPIdx_chase
+: sta bd_vo
   lda obj_pri
   xba
   and #$FF00
@@ -4062,12 +4082,27 @@ X_BossDraw:
   ; ---- list of (part id, dx, dy): head, left arm, right arm, body
   lda b_hy
   sta bp_l
-  lda #0                     ; arm poses: spread while the beam / shard attack runs, cannon when raised
+  lda #0                     ; arm poses: spread while the beam charges, cannon when raised
   ldx b_atk
   cpx #ATK_BEAM
   beq @spr
   cpx #ATK_SHARD
   bne :+
+  lda b_at                   ; v1.3 spin: arms out, then 4 frames a step: head and arms swing round
+  cmp #14
+  bcc @spr
+  cmp #66
+  bcs @spr
+  and #$000C
+  lsr
+  tax
+  lda f:SpinHd,x
+  sta bp_l
+  lda f:SpinAL,x
+  sta bp_l+2
+  lda f:SpinAR,x
+  sta bp_l+3
+  bra @bd
 @spr:
   lda #BP_ARM+4
   sta bp_l+2
@@ -4097,7 +4132,44 @@ X_BossDraw:
   lda bp_l
   sta bp_l+1
   A16
-  ; ---- draw: part ids in bytes bp_l+1..4
+  ; v1.3: no recoil running: body + both arms are one pre-merged list (rows: arm cells before body cells)
+  lda #5
+  sta bp_e
+  lda b_mf
+  bne @sep
+  lda bp_l+2
+  and #$00FF
+  sec
+  sbc #BP_ARM
+  lsr
+  sta t0                     ; left pose 0..2
+  asl
+  adc t0
+  sta t0
+  lda bp_l+3
+  and #$00FF
+  sec
+  sbc #BP_ARM+1
+  lsr
+  clc
+  adc t0
+  tax
+  lda f:CmbTab,x
+  and #$00FF
+  cmp #$00FF
+  beq @sep
+  asl
+  ora bp_l+4
+  and #$00FF
+  clc
+  adc #BP_CMB
+  A8
+  sta bp_l+2
+  A16
+  lda #3
+  sta bp_e
+@sep:
+  ; ---- draw: part ids in bytes bp_l+1 .. bp_e-1
   ldy oam_idx
   lda #1
   sta bp_n
@@ -4106,67 +4178,126 @@ X_BossDraw:
   lda bp_l,x
   and #$00FF
   sta bp_k                   ; part id
-  ; per-part offset: arms breathe 1 px, the firing arm kicks up 2 px
-  stz t2
+  ; per-part offset: arms breathe 1 px, the firing arm kicks up 3 px
+  lda b_sy
   cpx #2
   bcc @noff
   cpx #4
   bcs @noff
-  lda b_t
-  and #$0020
+  pha
+  lda b_mf
   beq :+
-  inc t2
-: lda b_mf
-  beq @noff
   txa                        ; X = 2 left arm, 3 right arm; b_side 0 = left
   dec a
   dec a
   cmp b_side
-  bne @noff
-  dec t2
-  dec t2
-  dec t2
-@noff:
-  lda b_sx
-  sta bp_sx
-  lda b_sy
-  clc
-  adc t2
-  sta bp_sy
-  lda bp_k                   ; index entry: 12 bytes
-  asl
-  sta t0
-  asl
-  clc
-  adc t0
-  asl
-  tax
-  lda view
-  cmp #VIEW_COCK
   bne :+
-  txa
+  pla
+  sec
+  sbc #3
+  pha
+: pla
+@noff:
+  sta bp_sy
+  lda bp_k                   ; index entry: 16 bytes (v1.3)
+  asl
+  asl
+  asl
+  asl
   clc
-  adc #BPIdx_cock-BPIdx_chase
+  adc bd_vo                  ; + the cockpit table's offset
   tax
-: lda f:BPIdx_chase+2,x
+  lda f:BPIdx_chase+2,x
   sta t3                     ; entries
-  lda bp_sx                  ; fast path: the whole part on screen and room in OAM
+  lda b_sx                   ; fast path: the part inside the screen horizontally, rows clipped
   sec
   sbc f:BPIdx_chase+4,x
-  bmi @slow
-  lda f:BPIdx_chase+6,x
+  bpl :+
+  jmp @slow
+: lda f:BPIdx_chase+6,x
   sec
-  sbc bp_sx
-  bmi @slow
-  lda bp_sy
-  sec
-  sbc f:BPIdx_chase+8,x
-  bmi @slow
+  sbc b_sx
+  bpl :+
+  jmp @slow
+: lda f:BPIdx_chase,x
+  sta bp_d
+  lda f:BPIdx_chase+8,x      ; first row dy
+  clc
+  adc bp_sy
+  sta t0                     ; y0: screen y of row 0
+  cmp #.loword(-15)
+  bmi @clip                  ; (signed: |y0| small)
+  clc
+  adc f:BPIdx_chase+10,x     ; + 16 * rows
+  cmp #240
+  bcs @clip
+  lda t3                     ; all rows on screen
+  bra @room
+@clip:
+  ; rows k0 <= k < k1 touch the screen: k0 = max(0, floor(-y0 / 16)), k1 = min(rows, ceil((224 - y0) / 16))
+  lda f:BPIdx_chase+12,x
+  sta t7                     ; row table
   lda f:BPIdx_chase+10,x
+  lsr
+  lsr
+  lsr
+  lsr
+  sta t6                     ; rows
+  lda #0
   sec
-  sbc bp_sy
-  bmi @slow
-  lda t3
+  sbc t0
+  bpl :+
+  lda #0
+: lsr
+  lsr
+  lsr
+  lsr
+  sta t1
+  lda #224+15
+  sec
+  sbc t0
+  bpl :+
+  jmp @pn                    ; below the screen
+: lsr
+  lsr
+  lsr
+  lsr
+  cmp t6
+  bcc :+
+  lda t6
+: sec
+  sbc t1
+  beq @pnj
+  bpl :+
+@pnj:
+  jmp @pn                    ; nothing on screen
+: sta t2                     ; visible rows
+  lda t1
+  asl
+  clc
+  adc t7
+  tax
+  lda f:BPRows,x
+  sta t5                     ; first visible entry (byte offset)
+  txa
+  clc
+  adc t2
+  adc t2
+  tax
+  lda f:BPRows,x
+  sec
+  sbc t5
+  lsr
+  lsr
+  lsr                        ; visible entries
+  pha
+  lda t5
+  clc
+  adc bp_d
+  sta bp_d
+  pla
+@room:
+  sta t3
   asl
   asl
   sta t0
@@ -4174,35 +4305,69 @@ X_BossDraw:
   clc
   adc t0
   cmp #513
-  bcs @slow
-  lda f:BPIdx_chase,x
-  tax
-  lda bp_sy
+  bcc :+
+  jmp @slow2                 ; no room: the clipping path for the whole part
+: lda bp_sy
   xba
   and #$FF00
   clc
-  adc bp_sx
+  adc b_sx
   sta t4                     ; (sy<<8)+sx
-@fl:
-  lda f:BPData,x
-  clc
-  adc t4
-  sta oam_lo,y
-  lda f:BPData+6,x
-  ora bd_t
-  sta oam_lo+2,y
-  iny
-  iny
-  iny
-  iny
-  txa
-  clc
-  adc #8
+  ; v1.3: straight-line copy, up to 64 sprites per pass (entered part-way: entries n-1 .. 0)
+@fc:
+  lda t3
+  cmp #97
+  bcc :+
+  lda #96
+: sta t6                     ; this pass
+  asl
   tax
-  dec t3
-  bne @fl
+  lda f:BDUnTab-2,x
+  sta t7
+  ldx bp_d
+.ifndef BDX2
+  pea .loword(@fdone-1)      ; the copy ends in an rts
+  jmp (t7)
+.endif
+@fdone:
+  lda t6                     ; Y += 4n, data += 8n
+  asl
+  asl
+  sta t0
+  tya
+  clc
+  adc t0
+  tay
+  lda t0
+  asl
+  clc
+  adc bp_d
+  sta bp_d
+  lda t3
+  sec
+  sbc t6
+  sta t3
+  bne @fc
   jmp @pn
+@slow2:
+  lda bp_k
+  asl
+  asl
+  asl
+  asl
+  clc
+  adc bd_vo
+  tax
+  lda f:BPIdx_chase+2,x
+  sta t3
+  lda b_sx
+  sta bp_sx
 @slow:
+.ifdef FASTONLY
+  jmp @pn
+.endif
+  lda b_sx
+  sta bp_sx
   lda f:BPIdx_chase,x
   tax
 @sl:
@@ -4273,11 +4438,29 @@ X_BossDraw:
 @pn:
   inc bp_n
   lda bp_n
-  cmp #5
+  cmp bp_e
   beq :+
   jmp @part
 : sty oam_idx
   rtl
+.repeat 96, I
+  .ident(.sprintf("BDUn%d", 95-I)):
+  lda f:BPData+8*(95-I),x
+  clc
+  adc t4
+  sta oam_lo+4*(95-I),y
+  lda f:BPData+8*(95-I)+6,x  ; (priority bits baked in per view)
+  sta oam_lo+4*(95-I)+2,y
+.endrepeat
+  rts
+CmbTab: .byte 0, 2, 6, 1, 3, $FF, 5, $FF, 4   ; [left pose * 3 + right pose] -> combo (poses: down, cannon, spread)
+SpinHd: .word BP_HEAD0-2, BP_HEAD0, BP_HEAD0+2, BP_HEAD0
+SpinAL: .word BP_ARM+4, BP_ARM+4, BP_ARM, BP_ARM
+SpinAR: .word BP_ARM+1, BP_ARM+5, BP_ARM+5, BP_ARM+1
+BDUnTab:
+.repeat 96, I
+  .word .loword(.ident(.sprintf("BDUn%d", I)))
+.endrepeat
 
 
 ; ================================================================ v1.2 tumbling objects (NMI)

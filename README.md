@@ -43,8 +43,10 @@ SNES emulator.
   skyscrapers) are small voxel models rendered offline by sprite stacking. The game picks the
   frame from the object's heading relative to the camera and streams only the frames in use to VRAM.
 * **Ground attack**: AA bunkers, tanks, and turrets can be shot (3 hits) for 300 points.
-* **Boss fight**: a giant sprite-stacked robot whose head tracks you and whose arms swing into
-  cannon and spread poses, with weak points, three attack phases, and its own music.
+* **Boss fight**: a towering glossy white-and-cobalt mech, pre-rendered in 3D, whose head tracks
+  you. It fires wrist cannons and shoulder missile pods, charges a blue energy swirl before its chest
+  beam, and spins to throw a ring of plasma orbs. It has weak points, three attack phases, and its
+  own music.
 * **Original 16-bit soundtrack**: title, stage, and boss themes plus a victory jingle on a
   custom SPC700 sound driver. Sound effects are hard-panned and moving (STEREO by default, with
   a MONO option).
@@ -136,6 +138,25 @@ For the full test methodology and the hardware-safety rules the code follows, se
 [docs/TECHNICAL.md](docs/TECHNICAL.md).
 
 ## Changelog
+
+### v1.3 (2026-11-20)
+
+* **Redesigned boss**: the robot now matches the reference mech: glossy white armour with sharp
+  highlights, cobalt shoulders, forearms, shins, and crest, a crown of white and blue spikes, a black
+  visor with red eyes, a glowing red triangle gem, a ribbed dark waist, flared lower legs, and green
+  knee nodes. It is rendered offline with a small raytracer (`tools/boss_rt.py`: cool key light,
+  warm orange rim, specular highlights, ordered dither to the 15-colour sprite palette).
+* **Bigger, low-angle framing**: the boss is drawn from a low camera and stands much taller on
+  screen (up to 96 sprites per frame). Its hover is slower and heavier.
+* **No swords**: wrist cannons (the muzzle flash and recoil come from the firing wrist) and
+  shoulder missile pods. Before the chest beam a blue energy swirl gathers around the gem. The old
+  shard spin is now a charged spin that fires a ring of blue plasma orbs.
+* **Same fight**: HP, weak points (gem and eyes), hit boxes for the taller body, damage states
+  (holes, scorch, smoke, sparks), and hit feedback are kept. The scorched palette is now 7/8
+  brightness instead of 3/4, so the armour still reads white.
+* **Performance**: body and arm parts are merged into one draw list when no cannon is firing,
+  sprites are copied by an unrolled loop, only visible rows are walked, and sprite priority is
+  baked into the data. The boss fight costs about the same as v1.2 (see TECHNICAL.md).
 
 ### v1.2 (2026-11-20)
 

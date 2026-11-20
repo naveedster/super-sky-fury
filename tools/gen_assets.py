@@ -771,52 +771,78 @@ cock_sheet = sh
 # body (normal / battle-damaged), head + crest (5 yaws: it turns to track you), each arm (down / cannon /
 # spread). boss_parts.inc holds one OAM list per part frame: (dy<<8)+dx, dx, dy, tile | attr << 8.
 import copy
-import boss_art, boss_vox
-BV_FR, BV_S = boss_vox.build_all()
-BV_C = BV_S // 2
-def _bv_full(name, half):
+import boss_art, boss_vox, boss_rt
+# v1.3: the robot is a pre-rendered 3D model (tools/boss_rt.py, glossy shading -> BOSS palette). The chase
+# view uses scale 1.0; the cockpit (fewer free tiles: its instruments stay) a 0.8 render.
+BV = {"chase": boss_rt.build_all(256, 1.0), "cock": boss_rt.build_all(256, 0.8)}
+def _bv_full(fr, S, name, half):
     """part frame -> [(dx, dy, tile16, hflip)] covering the whole part (mirror-half frames get both halves)"""
-    cs = boss_vox.cells(BV_FR[name], BV_C, BV_C, mirror_half=half)
+    cs = boss_vox.cells(fr[name], S // 2, S // 2, mirror_half=half)
+    cs = [c for c in cs if (c[2] > 0).sum() > 10]     # v1.3: no sprite for a few stray edge pixels
     out = [(dx, dy, t, 0) for dx, dy, t in cs]
     if half: out += [(-dx - 16, dy, t, 1) for dx, dy, t in cs]
     return out
 def _bv_flip(lst): return [(-dx - 16, dy, t, 1 - f) for dx, dy, t, f in lst]
-BV_PARTS = {"body": _bv_full("body", True)}
-# battle damage: only the cells that differ from the clean body (cut on the same grid)
-_dmg = boss_vox.cells(BV_FR["body_dmg"], BV_C, BV_C, mirror_half=False, best=False)
-_cl = BV_FR["body"].copy(); _cl[:, BV_C:] = _cl[:, :BV_C][:, ::-1][:, :BV_S - BV_C]
-_bd = []
-# paste the damaged render only around the blast spots (the rest stays the mirrored clean body)
-_yy, _xx = np.mgrid[0:BV_S, 0:BV_S]
-_spot = np.zeros((BV_S, BV_S), bool)
-for _ax, _ay, _r in boss_vox.DMG_SPOTS:
-    _spot |= (np.abs(_xx - (BV_C + _ax - boss_art.GEM[0])) <= _r + 2) & (_yy >= BV_C + _ay - boss_art.GEM[1] - _r - 2) & \
-             (_yy <= BV_C + _ay - boss_art.GEM[1] + _r + 7)
-_dimg = np.where(_spot & (BV_FR["body_dmg"] > 0) & (_cl > 0), BV_FR["body_dmg"], _cl)
-for dx, dy, t, f in BV_PARTS["body"]:
-    x0, y0 = BV_C + dx, BV_C + dy
-    d = _dimg[y0:y0 + 16, x0:x0 + 16]
-    c = _cl[y0:y0 + 16, x0:x0 + 16]
-    _bd.append((dx, dy, d.copy(), 0) if (d != c).any() else (dx, dy, t, f))
-BV_PARTS["body_dmg"] = _bd
-BV_PARTS["head0"] = _bv_full("head0", True)
-for y in (18, 36):
-    BV_PARTS[f"head{y}"] = _bv_full(f"head{y}", False); BV_PARTS[f"head-{y}"] = _bv_flip(BV_PARTS[f"head{y}"])
-for pz in boss_vox.POSES:
-    BV_PARTS[f"armL_{pz}"] = _bv_full(f"arm_{pz}", False); BV_PARTS[f"armR_{pz}"] = _bv_flip(BV_PARTS[f"armL_{pz}"])
-# logical part ids (the game's tables): 0 body, 1 body damaged, 2..6 head yaw -36..+36, 7.. arms (pose * 2 + side)
+def _bv_parts(fr, S, scale):
+    C = S // 2
+    P = {"body": _bv_full(fr, S, "body", True)}
+    _cl = fr["body"].copy(); _cl[:, C:] = _cl[:, :C][:, ::-1][:, :S - C]
+    # battle damage: one blast per target, centred in the 16x16 cell that holds it (4 changed cells)
+    cen = []
+    for tx, ty in boss_rt.DMG_SCREEN:
+        tx, ty = tx * scale, ty * scale
+        for dx, dy, t, f in P["body"]:
+            if dx <= tx < dx + 16 and dy <= ty < dy + 16: cen.append((C + dx + 7.5, C + dy + 7.5)); break
+    dimg = boss_rt.damage_px(_cl, cen, 5.2)
+    _bd = []
+    for dx, dy, t, f in P["body"]:
+        x0, y0 = C + dx, C + dy
+        d = dimg[y0:y0 + 16, x0:x0 + 16]; c = _cl[y0:y0 + 16, x0:x0 + 16]
+        _bd.append((dx, dy, d.copy(), 0) if (d != c).any() else (dx, dy, t, f))
+    P["body_dmg"] = _bd
+    P["head0"] = _bv_full(fr, S, "head0", True)
+    y = boss_rt.HEAD_YAWS[1]
+    P["head18"] = _bv_full(fr, S, f"head{y}", False); P["head-18"] = _bv_flip(P["head18"])
+    for pz in boss_rt.POSES:
+        P[f"armL_{pz}"] = _bv_full(fr, S, f"arm_{pz}", False); P[f"armR_{pz}"] = _bv_flip(P[f"armL_{pz}"])
+    return P
+BV_PARTS = {v: _bv_parts(*BV[v], {"chase": 1.0, "cock": 0.8}[v]) for v in BV}
+# logical part ids (the game's tables): 0 body, 1 body damaged, 2..6 head yaw (far left .. far right), 7.. arms (pose * 2 + side)
 BV_IDS = ["body", "body_dmg", "head-36", "head-18", "head0", "head18", "head36"] + \
-         [f"arm{sd}_{pz}" for pz in boss_vox.POSES for sd in "LR"]
-BV_VIEW_SUB = {"chase": {}, "cock": {"body_dmg": "body", "head-36": "head0", "head-18": "head0", "head18": "head0", "head36": "head0",
-                                     "armL_spread": "armL_down", "armR_spread": "armR_down"}}
+         [f"arm{sd}_{pz}" for pz in boss_rt.POSES for sd in "LR"]
+# v1.3 merged lists: body (+ damage) with both arms in a pose pair, drawn as one part when no arm recoils
+BV_CMB = [("down", "down"), ("cannon", "down"), ("down", "cannon"), ("cannon", "cannon"), ("spread", "spread"), ("spread", "down"), ("down", "spread")]
+for _l, _r in BV_CMB:
+    for _b in ("body", "body_dmg"):
+        BV_IDS.append(f"cmb_{_l}_{_r}_{_b}")
+BV_VIEW_SUB = {"chase": {"head-36": "head-18", "head36": "head18"},
+               "cock": {"head-36": "head0", "head-18": "head0", "head18": "head0", "head36": "head0", "body_dmg": "body",
+                        "armL_spread": "armL_down", "armR_spread": "armR_down"}}
 boss_out = {}
+CMB_ROW = {}
+def _ordered(view, n, ent):
+    """entries in draw order + (first row dy, row index per entry)"""
+    if (view, n) in CMB_ROW:
+        y0 = CMB_ROW[(view, n)]; return ent, y0, [(e[1] - y0) // 16 for e in ent]
+    se = sorted(ent, key=lambda e: (e[1], e[0])); y0 = se[0][1]
+    return se, y0, [(e[1] - y0) // 16 for e in se]
 def boss_sheet(view, field, drop):
     b = copy.deepcopy(field); b.free(drop)
-    used = [BV_VIEW_SUB[view].get(n, n) for n in BV_IDS]
+    sub = BV_VIEW_SUB[view]
+    used = [sub.get(n, n) for n in BV_IDS]
+    BVP = dict(BV_PARTS[view])
+    for n in BV_IDS:
+        if n.startswith("cmb_"):
+            _, l, r, bd = n.split("_", 3)
+            parts = [sub.get(f"armL_{l}", f"armL_{l}"), sub.get(f"armR_{r}", f"armR_{r}"), sub.get(bd, bd)]
+            BVP[n] = [("arm",) + e for p_ in parts[:2] for e in BVP[p_]] + [("body",) + e for e in BVP[parts[2]]]
+    # (merged entries carry a kind tag; strip it for the cell dedup, keep it for the row order)
+    KIND = {n: [e[0] for e in v] for n, v in BVP.items() if n.startswith("cmb_")}
+    BVP = {n: ([e[1:] for e in v] if n.startswith("cmb_") else v) for n, v in BVP.items()}
     uniq = {}                                   # tile bytes -> sheet name (identical / mirrored cells shared)
     refs = {}
     for n in dict.fromkeys(used):
-        for i, (dx, dy, t, f) in enumerate(BV_PARTS[n]):
+        for i, (dx, dy, t, f) in enumerate(BVP[n]):
             k = t.tobytes(); kf = np.ascontiguousarray(t[:, ::-1]).tobytes()
             if k in uniq: refs[(n, i)] = (uniq[k], 0)
             elif kf in uniq: refs[(n, i)] = (uniq[kf], 1)
@@ -832,16 +858,22 @@ def boss_sheet(view, field, drop):
     rows = [ty for ty in range(32) if data[ty * 512:(ty + 1) * 512] != old[ty * 512:(ty + 1) * 512]]
     for k, v in b.syms.items():
         if k.startswith("B") and not k.startswith("BC"): symbols[f"T_{view.upper()}_{k}"] = v
-    lut = np.array([(255, 0, 255)] + [tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)) for h in boss_art.BOSS_PAL[1:]], np.uint8)
+    lut = np.array([(255, 0, 255)] + [tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)) for h in boss_rt.PAL[1:]], np.uint8)
     Image.fromarray(lut[b.a]).save(f"{OUT}/sheet_{view}_boss.png")
     tabs_ = {}
     for n in dict.fromkeys(used):
         ent = []
-        for i, (dx, dy, t, f) in enumerate(BV_PARTS[n]):
+        for i, (dx, dy, t, f) in enumerate(BVP[n]):
             nm, ff = refs[(n, i)]
             tile = b.syms[nm]; hf = f ^ ff
             attr = 0x0E | (tile >> 8 & 1) | (0x40 if hf else 0)
             ent.append((dx, dy, (tile & 0xFF) | attr << 8))
+        if n in KIND:
+            # rows of the body grid; in each row the arm cells come first (drawn over the body)
+            bdy = [e for e, k in zip(ent, KIND[n]) if k == "body"]
+            y0 = min(e[1] for e in bdy)
+            ent = [e for _, e in sorted(((((e[1] - y0) // 16, 0 if k == "arm" else 1, e[1], e[0]), e) for e, k in zip(ent, KIND[n])), key=lambda t: t[0])]
+            CMB_ROW[(view, n)] = y0
         tabs_[n] = ent
     boss_out[view] = (b, rows, used, tabs_)
 CLOUDS_ALL = ["CLOUDB0", "CLOUDS0", "BOMB_N", "BOMB_F", "FORT_C", "FORT_W"]   # v1.1: no bombers during the boss
@@ -850,12 +882,24 @@ boss_sheet("chase", chase_sheet, CLOUDS_ALL + ["CLOUDT0", "EL_TOW", "ES", "EXS",
 boss_sheet("cock", cock_sheet, CLOUDS_ALL + ["EL_TOW", "EM", "ES", "EXS", "EXXS"])
 with open(f"{OUT}/boss.inc", "w") as fo:
     fo.write("; generated by tools/gen_assets.py (boss v1.2)\n")
-    fo.write(f"BOSS_EYE_DY = {boss_art.GEM[1] - boss_art.EYE_Y}\n")
+    fr_ = BV["chase"][0]
+    fo.write(f"BOSS_EYE_DY = {fr_['_eye_dy']}\n")
+    for view in ("chase", "cock"):
+        f2 = BV[view][0]
+        fo.write(f"BOSS_FOOT_X_{view.upper()} = {f2['_foot'][0]}\nBOSS_FOOT_Y_{view.upper()} = {f2['_foot'][1]}\n")
+        fo.write(f"BOSS_MUZ_X_{view.upper()} = {f2['_muzzle']['cannon'][0]}\nBOSS_MUZ_Y_{view.upper()} = {f2['_muzzle']['cannon'][1]}\n")
     for view in ("chase", "cock"):
         b, rows, used, tabs_ = boss_out[view]
         fo.write(f"BossRows_{view}: .byte " + ",".join(str(r) for r in rows) + f"\nBOSS_NROWS_{view.upper()} = {len(rows)}\n")
     def bgr(h): r, g, b_ = (int(h[i:i + 2], 16) for i in (1, 3, 5)); return (r >> 3) | ((g >> 3) << 5) | ((b_ >> 3) << 10)
-    fo.write("BossPal: .word " + ",".join(f"${bgr(h):04X}" for h in boss_art.BOSS_PAL) + "\n")
+    # v1.3 blue energy orbit tables: spin ring (16 angles, 96 x 20 px ellipse, 14 px below the gem) and the
+    # beam charge swirl (16 radius levels x 32 angles); entries are sprite offsets (top-left) from the gem
+    fo.write("SpinTab: .word " + ", ".join(f"${(round(96 * math.cos(2 * math.pi * i / 16)) - 8) & 0xFFFF:04X}, ${(round(20 * math.sin(2 * math.pi * i / 16)) + 6) & 0xFFFF:04X}" for i in range(16)) + "\n")
+    fo.write("SwirlTab:\n")
+    for lv in range(16):
+        r = (64 - 4 * lv) * 1.5 + 5
+        fo.write("  .word " + ", ".join(f"${(round(r * math.cos(2 * math.pi * j / 32)) - 8) & 0xFFFF:04X}, ${(round(r * math.sin(2 * math.pi * j / 32)) - 8) & 0xFFFF:04X}" for j in range(32)) + "\n")
+    fo.write("BossPal: .word " + ",".join(f"${bgr(h):04X}" for h in boss_rt.PAL) + "\n")
     fo.write("NavyPal: .word " + ",".join(f"${bgr('#%02x%02x%02x' % c):04X}" for c in CGRAM[240:256]) + "\n")
 with open(f"{OUT}/boss_parts.inc", "w") as fo:
     fo.write("; generated by tools/gen_assets.py: boss part OAM lists (boss v1.2, tools/boss_vox.py)\n")
@@ -863,23 +907,33 @@ with open(f"{OUT}/boss_parts.inc", "w") as fo:
     xs, ys = [], []
     for view in ("chase", "cock"):
         b, rows, used, tabs_ = boss_out[view]
-        fo.write(f"BPIdx_{view}:   ; per logical part id: offset into BPData, entries, fast-path sx / sy range\n")
+        fo.write(f"BPIdx_{view}:   ; per part id (16 bytes): BPData offset, entries, fast sx range, first row dy, 16 * rows, BPRows offset, 0\n")
         M = 3   # animation offsets (bob, recoil) stay inside this margin
         for n in used:
             e = tabs_[n]
             x0 = -min(dx for dx, dy, w in e) + M; x1 = 256 - max(dx + 16 for dx, dy, w in e) - M
-            y0 = -min(dy for dx, dy, w in e) + M; y1 = 224 - max(dy + 16 for dx, dy, w in e) - M
-            fo.write(f"  .word BPL_{view}_{n.replace('-', 'm')}-BPData, {len(e)}, " + ", ".join(f"${v & 0xFFFF:04X}" for v in (x0, x1, y0, y1)) + "\n")
-    fo.write("BPData:\n")
+            _, dy0, rk = _ordered(view, n, e); nr = max(rk) + 1
+            fo.write(f"  .word BPL_{view}_{n.replace('-', 'm')}-BPData, {len(e)}, " + ", ".join(f"${v & 0xFFFF:04X}" for v in (x0, x1, dy0)) +
+                     f", {16 * nr}, BPR_{view}_{n.replace('-', 'm')}-BPRows, 0\n")
+    fo.write("BPData:   ; (dy<<8)+dx, dx, dy, tile | attr<<8 (priority bits baked in per view), rows top to bottom\n")
+    for view in ("chase", "cock"):
+        b, rows, used, tabs_ = boss_out[view]
+        pri = {"chase": 0x30, "cock": 0x10}[view]
+        for n, ent in tabs_.items():
+            fo.write(f"BPL_{view}_{n.replace('-', 'm')}:\n")
+            for dx, dy, w in _ordered(view, n, ent)[0]:
+                xs += [dx, dx + 16]; ys += [dy, dy + 16]
+                fo.write(f"  .word ${(dy * 256 + dx) & 0xFFFF:04X}, ${dx & 0xFFFF:04X}, ${dy & 0xFFFF:04X}, ${w | pri << 8:04X}\n")
+    fo.write("BPRows:   ; per part: byte offset of each 16 px row's first entry (+ end)\n")
     for view in ("chase", "cock"):
         b, rows, used, tabs_ = boss_out[view]
         for n, ent in tabs_.items():
-            fo.write(f"BPL_{view}_{n.replace('-', 'm')}:\n")
-            for dx, dy, w in ent:
-                xs += [dx, dx + 16]; ys += [dy, dy + 16]
-                fo.write(f"  .word ${(dy * 256 + dx) & 0xFFFF:04X}, ${dx & 0xFFFF:04X}, ${dy & 0xFFFF:04X}, ${w:04X}\n")
+            se, dy0, rk = _ordered(view, n, ent); nr = max(rk) + 1
+            assert rk == sorted(rk) and min(rk) >= 0, n
+            offs = [8 * next(i for i, r_ in enumerate(rk + [10 ** 6]) if r_ >= k) for k in range(nr)] + [8 * len(se)]
+            fo.write(f"BPR_{view}_{n.replace('-', 'm')}: .word " + ", ".join(str(o) for o in offs) + "\n")
     fo.write(f"BOSS_FAST_X0 = {-min(xs) + M}\nBOSS_FAST_X1 = {256 - max(xs) - M}\nBOSS_FAST_Y0 = {-min(ys) + M}\nBOSS_FAST_Y1 = {224 - max(ys) - M}\n")
-    fo.write(f"BOSS_MAXN = {max(sum(len(boss_out['chase'][3][n]) for n in grp) for grp in [['body', 'head18', 'armL_spread', 'armR_spread'], ['body_dmg', 'head36', 'armL_spread', 'armR_spread'], ['body', 'head0', 'armL_cannon', 'armR_cannon']])}\n")
+    fo.write(f"BOSS_MAXN = {max(sum(len(boss_out['chase'][3][n]) for n in grp) for grp in [['body', 'head18', 'armL_spread', 'armR_spread'], ['body_dmg', 'head18', 'armL_spread', 'armR_spread'], ['body', 'head0', 'armL_cannon', 'armR_cannon']])}\n")
     print("boss parts: x", min(xs), max(xs), "y", min(ys), max(ys))
 
 # ----------------------------------------------------------------- v1.2 tumbling objects (streamed 16x16 frames)
