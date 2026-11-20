@@ -401,6 +401,9 @@ MainLoop:
   jsr BuildFrame
   lda bright                 ; v1.1: stage fades (15 = full)
   sta inidisp
+  lda tb_bld                 ; v1.2: tumbling frame sets drawn this frame (the NMI refreshes only those)
+  sta tb_cur
+  stz tb_bld
   lda #1
   sta c_flag
   inc loops
@@ -1272,6 +1275,7 @@ NmiFast:
   jsl X_Nmi                  ; v1.1: floating-number glyphs, scorched boss palette
   jsr BossNmi               ; boss palette / colour animation / sheet streaming
   jsl X_Stream               ; v1.1: sprite-stack frames (jet / near enemies / ground props), line-budgeted
+  jsl X_Tumble               ; v1.2: tumbling debris / missiles / capsules / shards (2 frames per vblank)
   ; hit flash: red fixed colour added over the picture (HDMA ch 7 table swap in perspective views)
   lda view
   cmp #VIEW_OVER
@@ -3949,11 +3953,11 @@ MapCock:  .incbin "../assets/map_cock.bin"
 .include "../assets/romname.inc"  ; "SUPER SKY FURY" padded to 21 (tools/title_art.py)
   .byte $30                       ; LoROM, FastROM
   .byte $00                       ; ROM only
-  .byte $09                       ; 512 KB (boss v1)
+  .byte $0A                       ; 1 MB (v1.2: ground prop frames in banks $90-$93)
   .byte $00                       ; no SRAM
   .byte $01                       ; North America
   .byte $00                       ; developer
-  .byte $01                       ; version (v1.1)
+  .byte $02                       ; version (v1.2)
   .word $FFFF                     ; checksum complement (fixed by build)
   .word $0000                     ; checksum
 

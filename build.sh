@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 mkdir -p build
 python3 tools/gen_assets.py assets
 python3 tools/title_art.py assets
-python3 tools/boss_fast.py
+# (v1.2: boss part tables come from gen_assets.py / boss_vox.py)
 python3 music/make_music.py
 python3 music/make_boss.py
 (cd src && ca65 -g --cpu 65816 -I . -o ../build/main.o main.s)   # run from src/ so "../assets", "../music" resolve inside the repo

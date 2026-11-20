@@ -46,7 +46,7 @@ setpal(176, FRAME)
 setpal(192, ["#000000"] + ["#000000"] * 15)     # shadow palette (half-transparent black via color math)
 setpal(208, ["#000000"] + ["#ffffff"] * 15)     # translucent white (overhead contrails)
 # enemy type palettes (chase/cockpit only; overhead keeps palette 3 because colour math blends 4-7 there)
-setpal(224, FRAME[:8] + ["#2a3416", "#566c2c", "#80984a", "#b4c884", "#8c8a6c", "#c8c4a4", "#ffe070", "#12283a"])  # olive camo
+setpal(224, FRAME[:8] + ["#2a3416", "#566c2c", "#80984a", "#b4c884", "#9aa0a8", "#e0d4a0", "#ffe070", "#12283a"])  # olive camo + ocean props (v1.2: recoloured per stage)
 setpal(240, FRAME[:8] + ["#121a34", "#26386a", "#4060a8", "#7c9ce4", "#5a6274", "#a8b0c0", "#ffd040", "#401010"])  # navy
 
 # ----------------------------------------------------------------- periodic noise
@@ -298,6 +298,9 @@ def render_enemy(view, roll_deg, yaw_deg, size, scale, pitch_deg=38, ss=4, outli
 # ----------------------------------------------------------------- v1.1 sprite stacking (tools/voxstack.py)
 # The plan-form polygons above are voxelized into solid models; every frame is a sprite-stacked render.
 import voxstack as vs
+import tumble_cfg
+TUMBLE_MODELS = vs.tumble_models()
+TUMBLE_FR = {k: tumble_cfg.tumble_frames(TUMBLE_MODELS, k) for k in tumble_cfg.TUMBLE}   # v1.2: 8 frames each
 VOX_JET = vs.voxelize(jet_polys(), 0.4, fill={"body": 0.9, "spine": 0.9, "canopy": 2.25, "radome": 0.9})
 VOX_EN = vs.voxelize(enemy_polys(), 0.4, fill={"body": 0.9, "spine": 0.9, "canopy": 2.2})
 render_jet_poly = render_jet; render_enemy_poly = render_enemy
@@ -468,11 +471,11 @@ def fx_frames(two_big=True, two_debris=True, extra=True):
     if extra:
         f["X16C"] = smoke_puff(16, 6.6, 12, embers=True)
         if extra != "nopuff": f["PUFF"] = puff_small()
-    f["DEB0"] = shard(1)
-    if two_debris: f["DEB1"] = shard(2)
+    f["DEB0"] = TUMBLE_FR["DEB0"][0]          # v1.2: sprite-stacked, streamed tumbling frames (frame 0 here)
+    if two_debris: f["DEB1"] = TUMBLE_FR["DEB1"][0]
     f["BUL0"] = bullet(True); f["BUL1"] = bullet(False)
-    f["MSL"] = missile_spr()
-    f["EBUL0"] = ebullet(True); f["EBUL1"] = ebullet(False); f["EMSL"] = emissile()
+    f["MSL"] = TUMBLE_FR["MSL"][0]
+    f["EBUL0"] = ebullet(True); f["EBUL1"] = ebullet(False); f["EMSL"] = TUMBLE_FR["EMSL"][0]
     return f
 
 # ----------------------------------------------------------------- v1.1 art: bomber, sky fortress, power-ups, hit spark, popup font
@@ -570,7 +573,7 @@ BOMB_N = render_bomber(32, 0.98); BOMB_F = render_bomber(16, 0.47)
 FORT_C, FORT_W = fortress_cells()
 def v11_frames():
     return {"BOMB_N": BOMB_N, "BOMB_F": BOMB_F, "FORT_C": FORT_C, "FORT_W": FORT_W,
-            "PU_P": capsule("P", 9), "PU_M": capsule("M", 4), "PU_S": capsule("S", 1), "HSPARK": hit_spark(),
+            "PU_P": TUMBLE_FR["PU_P"][0], "PU_M": TUMBLE_FR["PU_M"][0], "PU_S": TUMBLE_FR["PU_S"][0], "HSPARK": hit_spark(),
             "POP0": np.zeros((16, 32), np.uint8), "POP1": np.zeros((16, 32), np.uint8)}
 
 symbols = {}
@@ -606,13 +609,23 @@ for jg in jet_frames:
 EN_YAWS = [render_enemy("chase", 0, u * 22.5, 32, 1.02) for u in range(9)]
 for k in range(6): sh.put(f"SLOT{k}", EN_YAWS[8])
 for u in range(5): sh.put(f"EMY{u}", render_enemy("chase", 0, u * 45.0, 16, 0.50))
-PROPS = vs.prop_models(); PROP_TYPES = ("tower", "tank", "bunker")
+# v1.2: per-stage ground props. Four slots per stage (0 open water / sand, 1 nature, 2 structure,
+# 3 military = shootable); each stage maps its slots to voxel models (STAGE_PROPS). Near: 16 streamed
+# yaw frames per model (ROM banks $90+), mid / far: 16x16 frames uploaded per stage at LoadView.
+PROPS12 = vs.prop_models_v12()
+PROP12_LIST = ["carrier", "palms", "oilrig", "bunker", "skyscraper", "pyramid", "rocks", "radar", "tank",
+               "iceberg", "pines", "igloo", "turret"]
+PROP12_SCALE = {"carrier": 1.15, "skyscraper": 1.05, "pyramid": 1.25, "iceberg": 1.3, "palms": 1.3}
+STAGE_PROPS = [["carrier", "palms", "oilrig", "bunker"], ["pyramid", "rocks", "radar", "tank"],
+               ["iceberg", "pines", "igloo", "turret"], ["carrier", "skyscraper", "oilrig", "bunker"]]
+SLOT_WATER = [(0, 2), (0,)]          # per map: slots that stand on water (map B: sand / sea)
 def render_prop(t, yaw, size, scale, pc, outline=1):
-    return vs.render(PROPS[t], vs.PROP_RAMPS, "chase", yaw=yaw, pitch_cam=pc, size=size, scale=scale,
+    return vs.render(PROPS12[t], vs.PROP12_RAMPS, "chase", yaw=yaw, pitch_cam=pc, size=size, scale=scale * PROP12_SCALE.get(t, 1.4) / 1.4,
                      oy=size / 2 - 3, dither=size > 16, flat_top=0.18, outline=outline)
-PROP_NEAR = [[render_prop(t, d * 22.5, 32, 1.4, 30) for d in range(16)] for t in PROP_TYPES]
-for i, t in enumerate(PROP_TYPES):
-    sh.put(f"PRM{i}", render_prop(t, 30, 16, 0.7, 22)); sh.put(f"PRF{i}", render_prop(t, 30, 16, 0.36, 15, outline=0))
+PROP_NEAR = [[render_prop(t, d * 22.5, 32, 1.4, 30) for d in range(16)] for t in PROP12_LIST]
+PROP_MID = {t: (render_prop(t, 30, 16, 0.7, 22), render_prop(t, 30, 16, 0.36, 15, outline=0)) for t in PROP12_LIST}
+for i, t in enumerate(STAGE_PROPS[0]):
+    sh.put(f"PRM{i}", PROP_MID[t][0]); sh.put(f"PRF{i}", PROP_MID[t][1])
 sh.put("CLOUDB0", clouds_big[0]); sh.put("CLOUDS0", clouds_small[0])   # v1.1: one shape each (h-flipped for variety)
 # far clouds in the chase view: 16x16 half-size copies (1 sprite instead of 4)
 for i, c in enumerate(clouds_small[:1]):
@@ -638,30 +651,40 @@ def tile_rows(g, tw):
             out += to4bpp(g[ty * 8:ty * 8 + 8, tx * 8:tx * 8 + 8])
     return bytes(out)
 open(f"{OUT}/jetframes.bin", "wb").write(b"".join(tile_rows(j, 8) for j in jet_frames))
-SLOT_FRAMES = EN_YAWS + [f for fr in PROP_NEAR for f in fr]
+SLOT_FRAMES = EN_YAWS
 open(f"{OUT}/slotframes.bin", "wb").write(b"".join(tile_rows(f, 4) for f in SLOT_FRAMES))
-def place_bases(info, seed, nbase=8):
+open(f"{OUT}/propframes.bin", "wb").write(b"".join(tile_rows(f, 4) for fr in PROP_NEAR for f in fr))
+def place_bases(info, seed, mi, nbase=9, nwater=3):
     """ground props for one Mode 7 map, grouped in bases (so the game culls a whole base at once):
-    the airfield (tower, fuel tanks, AA bunkers), every town, then AA sites on open land.
-    -> [(cx, cy, [(ox, oy, type, yaw16), ...])] in map pixels; |offsets| < 64."""
+    the airfield, every town, open land, then open water (carriers / rigs, pyramids, icebergs).
+    Prop types are stage slots (see STAGE_PROPS). -> [(cx, cy, [(ox, oy, slot, yaw16), ...])]; |offsets| < 64."""
     land = info["land"]; r_ = np.random.default_rng(seed); bases = []
     def onland(x, y): return bool(land[int(y) % 1024, int(x) % 1024])
+    def openw(x, y):
+        return not any(onland(x + dx, y + dy) for dx in (-22, 0, 22) for dy in (-22, 0, 22))
+    def ok(x, y, t): return openw(x, y) if t in SLOT_WATER[mi] else onland(x, y)
     def far(x, y): return all(min(abs(x - a), 1024 - abs(x - a)) + min(abs(y - b), 1024 - abs(y - b)) > 150 for a, b, _ in bases)
-    def base(cx, cy, layout):
-        if len(bases) >= nbase or not far(cx, cy): return
-        ps = [(ox, oy, t, int(r_.integers(16))) for ox, oy, t in layout if onland(cx + ox, cy + oy)]
-        if len(ps) >= 2: bases.append((int(cx) % 1024, int(cy) % 1024, ps))
+    def base(cx, cy, layout, lim=nbase):
+        if len(bases) >= lim or not far(cx, cy): return
+        ps = [(ox, oy, t, int(r_.integers(16))) for ox, oy, t in layout if ok(cx + ox, cy + oy, t)]
+        if len(ps) >= 2 or (ps and ps[0][2] in SLOT_WATER[mi]): bases.append((int(cx) % 1024, int(cy) % 1024, ps))
+    st_ = 2 if mi else 1
     if info["airfield"]:
         y, x0, L = info["airfield"]; cx = (x0 + L / 2) * 8; cy = y * 8 + 8
-        base(cx, cy, [(-L * 4 + 6, -22, 0), (L * 4 - 14, 26, 1), (L * 4 - 34, 28, 1), (-L * 4 - 18, 4, 2), (L * 4 + 18, 6, 2)])
+        base(cx, cy, [(-L * 4 + 6, -22, st_), (L * 4 - 14, 26, 3), (L * 4 - 34, 28, 1), (-L * 4 - 18, 4, 3), (L * 4 + 18, 6, st_)])
     for ty, tx in info["towns"]:
-        base(tx * 8, ty * 8, [(-30, -20, 0), (28, 22, 1), (10, -36, 2), (-34, 26, 2)])
+        base(tx * 8, ty * 8, [(-30, -20, st_), (28, 22, 1), (10, -36, 3), (-34, 26, st_ if mi else 1)], nbase - nwater)
     tries = 0
-    while len(bases) < nbase and tries < 3000:
+    while len(bases) < nbase - nwater and tries < 3000:
         tries += 1; cx, cy = r_.integers(1024), r_.integers(1024)
-        if onland(cx, cy): base(cx, cy, [(0, 0, 2), (-34, 18, 2), (30, -16, 1), (20, 30, 2)])
+        if onland(cx, cy): base(cx, cy, [(0, 0, 3), (-34, 18, 1), (30, -16, st_), (20, 30, 1)], nbase - nwater)
+    tries = 0
+    wl = [(0, 0, 0), (-44, 34, 2)] if mi == 0 else [(0, 0, 0), (-38, 26, 0)]
+    while len(bases) < nbase and tries < 6000:
+        tries += 1; cx, cy = r_.integers(1024), r_.integers(1024)
+        if openw(cx, cy): base(cx, cy, wl)
     return bases
-PROP_MAPS = [place_bases(terrain.INFO[""], 5), place_bases(terrain.INFO["B"], 6)]
+PROP_MAPS = [place_bases(terrain.INFO[""], 5, 0), place_bases(terrain.INFO["B"], 6, 1)]
 print("ground prop bases:", [len(m) for m in PROP_MAPS], "props:", [sum(len(b[2]) for b in m) for m in PROP_MAPS])
 with open(f"{OUT}/stack.inc", "w") as fo:
     fo.write("; generated by tools/gen_assets.py (v1.1 sprite stacking)\n")
@@ -676,6 +699,23 @@ with open(f"{OUT}/stack.inc", "w") as fo:
             fo.write(f"  .word {cx}, {cy}, {len(ps)}, {k * 8}\n"); k += len(ps); props += ps
     fo.write("PropOff:  ; dx, dy (from the base centre), type, yaw (16ths)\n")
     for ox, oy, t, yw in props: fo.write(f"  .word {ox & 0xFFFF}, {oy & 0xFFFF}, {t}, {yw}\n")
+    fo.write(f"NPROP12 = {len(PROP12_LIST)}\nNPROPS = {len(props)}\n")
+    fo.write("StageMod:  ; per stage, per slot: first near frame id (SS_PR + model * 16)\n")
+    for sp in STAGE_PROPS: fo.write("  .word " + ", ".join(str(len(EN_YAWS) + PROP12_LIST.index(t) * 16) for t in sp) + "\n")
+# v1.2: prop offsets pre-rotated for all 256 headings (replaces four 8-bit multiplies per prop):
+# per heading, per prop: dz = PMul(ox, S) - PMul(oy, C), dx = PMul(ox, C) + PMul(oy, S) as signed bytes
+def _pmul(a, t): return (1 if a * t >= 0 else -1) * ((abs(a) * abs(t)) >> 8)
+rot = bytearray()
+sint_ = [max(-255, min(255, int(round(math.sin(i * 2 * math.pi / 256) * 256)))) for i in range(256)]
+for h in range(256):
+    S_ = sint_[h]; C_ = sint_[(h + 64) & 255]
+    for ox, oy, t, yw in props:
+        dz = _pmul(ox, S_) - _pmul(oy, C_); dx = _pmul(ox, C_) + _pmul(oy, S_)
+        assert -128 <= dz < 128 and -128 <= dx < 128
+        rot += bytes([dz & 255, dx & 255])
+assert len(rot) // 2 <= 32768 and len(props) * 2 < 256
+open(f"{OUT}/proprot.bin", "wb").write(bytes(rot))
+open(f"{OUT}/propmid.bin", "wb").write(b"".join(tile_rows(PROP_MID[t][k], 2) for sp in STAGE_PROPS for k in (0, 1) for t in sp))
 
 # cockpit sheet: pal2 HUD (green), clouds pal1, frame pal3
 sh = Sheet()
@@ -724,53 +764,144 @@ for k, g in v11_frames().items():
 emit_sheet("cock", sh)
 cock_sheet = sh
 
-# ----------------------------------------------------------------- boss sheets (boss v1)
+# ----------------------------------------------------------------- boss sheets (v1.2: sprite-stacked parts)
 # During the boss fight the chase / cockpit OBJ sheets swap clouds + enemy-plane frames for the boss
-# robot's 16x16 pieces (left half; the right half is drawn h-flipped), beam orbs, shards, thrusters.
-# Only the 512-byte sheet rows that differ are streamed to VRAM (NMI, during the WARNING).
+# robot's 16x16 pieces, beam orbs, shards, thrusters. Only the 512-byte sheet rows that differ are streamed to
+# VRAM (NMI, during the WARNING). v1.2: the robot is a voxel model (tools/boss_vox.py) drawn as part groups:
+# body (normal / battle-damaged), head + crest (5 yaws: it turns to track you), each arm (down / cannon /
+# spread). boss_parts.inc holds one OAM list per part frame: (dy<<8)+dx, dx, dy, tile | attr << 8.
 import copy
-import boss_art
-BOSS_D = boss_art.render(False); BOSS_U = boss_art.render(True)
-cells_d = boss_art.pieces16(BOSS_D); cells_u = boss_art.pieces16(BOSS_U)
-cell_keys = sorted(set(cells_d) | set(cells_u), key=lambda k: (k[1], k[0]))
+import boss_art, boss_vox
+BV_FR, BV_S = boss_vox.build_all()
+BV_C = BV_S // 2
+def _bv_full(name, half):
+    """part frame -> [(dx, dy, tile16, hflip)] covering the whole part (mirror-half frames get both halves)"""
+    cs = boss_vox.cells(BV_FR[name], BV_C, BV_C, mirror_half=half)
+    out = [(dx, dy, t, 0) for dx, dy, t in cs]
+    if half: out += [(-dx - 16, dy, t, 1) for dx, dy, t in cs]
+    return out
+def _bv_flip(lst): return [(-dx - 16, dy, t, 1 - f) for dx, dy, t, f in lst]
+BV_PARTS = {"body": _bv_full("body", True)}
+# battle damage: only the cells that differ from the clean body (cut on the same grid)
+_dmg = boss_vox.cells(BV_FR["body_dmg"], BV_C, BV_C, mirror_half=False, best=False)
+_cl = BV_FR["body"].copy(); _cl[:, BV_C:] = _cl[:, :BV_C][:, ::-1][:, :BV_S - BV_C]
+_bd = []
+# paste the damaged render only around the blast spots (the rest stays the mirrored clean body)
+_yy, _xx = np.mgrid[0:BV_S, 0:BV_S]
+_spot = np.zeros((BV_S, BV_S), bool)
+for _ax, _ay, _r in boss_vox.DMG_SPOTS:
+    _spot |= (np.abs(_xx - (BV_C + _ax - boss_art.GEM[0])) <= _r + 2) & (_yy >= BV_C + _ay - boss_art.GEM[1] - _r - 2) & \
+             (_yy <= BV_C + _ay - boss_art.GEM[1] + _r + 7)
+_dimg = np.where(_spot & (BV_FR["body_dmg"] > 0) & (_cl > 0), BV_FR["body_dmg"], _cl)
+for dx, dy, t, f in BV_PARTS["body"]:
+    x0, y0 = BV_C + dx, BV_C + dy
+    d = _dimg[y0:y0 + 16, x0:x0 + 16]
+    c = _cl[y0:y0 + 16, x0:x0 + 16]
+    _bd.append((dx, dy, d.copy(), 0) if (d != c).any() else (dx, dy, t, f))
+BV_PARTS["body_dmg"] = _bd
+BV_PARTS["head0"] = _bv_full("head0", True)
+for y in (18, 36):
+    BV_PARTS[f"head{y}"] = _bv_full(f"head{y}", False); BV_PARTS[f"head-{y}"] = _bv_flip(BV_PARTS[f"head{y}"])
+for pz in boss_vox.POSES:
+    BV_PARTS[f"armL_{pz}"] = _bv_full(f"arm_{pz}", False); BV_PARTS[f"armR_{pz}"] = _bv_flip(BV_PARTS[f"armL_{pz}"])
+# logical part ids (the game's tables): 0 body, 1 body damaged, 2..6 head yaw -36..+36, 7.. arms (pose * 2 + side)
+BV_IDS = ["body", "body_dmg", "head-36", "head-18", "head0", "head18", "head36"] + \
+         [f"arm{sd}_{pz}" for pz in boss_vox.POSES for sd in "LR"]
+BV_VIEW_SUB = {"chase": {}, "cock": {"body_dmg": "body", "head-36": "head0", "head-18": "head0", "head18": "head0", "head36": "head0",
+                                     "armL_spread": "armL_down", "armR_spread": "armR_down"}}
 boss_out = {}
 def boss_sheet(view, field, drop):
     b = copy.deepcopy(field); b.free(drop)
-    for k in cell_keys:
-        if k in cells_d: b.put(f"BD{k[0]}{k[1]}", cells_d[k])
-        if k in cells_u and (k not in cells_d or (cells_d[k] != cells_u[k]).any()): b.put(f"BU{k[0]}{k[1]}", cells_u[k])
+    used = [BV_VIEW_SUB[view].get(n, n) for n in BV_IDS]
+    uniq = {}                                   # tile bytes -> sheet name (identical / mirrored cells shared)
+    refs = {}
+    for n in dict.fromkeys(used):
+        for i, (dx, dy, t, f) in enumerate(BV_PARTS[n]):
+            k = t.tobytes(); kf = np.ascontiguousarray(t[:, ::-1]).tobytes()
+            if k in uniq: refs[(n, i)] = (uniq[k], 0)
+            elif kf in uniq: refs[(n, i)] = (uniq[kf], 1)
+            else:
+                nm = f"BC{len(uniq)}"; uniq[k] = nm; b.put(nm, t); refs[(n, i)] = (nm, 0)
     b.put("BORB0", boss_art.beam_orb(True)); b.put("BORB1", boss_art.beam_orb(False))
-    b.put("BSHARD", boss_art.shard_spr())
+    b.put("BSHARD", TUMBLE_FR["BSHARD"][0])
     b.put("BFLAME0", boss_art.flame16(0)); b.put("BFLAME1", boss_art.flame16(1))
-    free = b.pack(); print(f"boss sheet {view}: {free} tiles free")
+    print(f"boss sheet {view}: {len(uniq)} boss cells, room", int((~b.used).sum()), "tiles before packing")
+    free = b.pack(); print(f"boss sheet {view}: {free} tiles free, {len(uniq)} boss cells")
     data = b.bin(); old = field.bin()
     open(f"{OUT}/obj_{view}_boss.bin", "wb").write(data)
     rows = [ty for ty in range(32) if data[ty * 512:(ty + 1) * 512] != old[ty * 512:(ty + 1) * 512]]
     for k, v in b.syms.items():
-        if k.startswith("B"): symbols[f"T_{view.upper()}_{k}"] = v
+        if k.startswith("B") and not k.startswith("BC"): symbols[f"T_{view.upper()}_{k}"] = v
     lut = np.array([(255, 0, 255)] + [tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)) for h in boss_art.BOSS_PAL[1:]], np.uint8)
     Image.fromarray(lut[b.a]).save(f"{OUT}/sheet_{view}_boss.png")
-    boss_out[view] = (b, rows)
+    tabs_ = {}
+    for n in dict.fromkeys(used):
+        ent = []
+        for i, (dx, dy, t, f) in enumerate(BV_PARTS[n]):
+            nm, ff = refs[(n, i)]
+            tile = b.syms[nm]; hf = f ^ ff
+            attr = 0x0E | (tile >> 8 & 1) | (0x40 if hf else 0)
+            ent.append((dx, dy, (tile & 0xFF) | attr << 8))
+        tabs_[n] = ent
+    boss_out[view] = (b, rows, used, tabs_)
 CLOUDS_ALL = ["CLOUDB0", "CLOUDS0", "BOMB_N", "BOMB_F", "FORT_C", "FORT_W"]   # v1.1: no bombers during the boss
 boss_sheet("chase", chase_sheet, CLOUDS_ALL + ["CLOUDT0", "EL_TOW", "ES", "EXS", "EXXS"] + [f"SLOT{k}" for k in range(6)]
-           + [f"EMY{u}" for u in range(5)] + [f"PR{a}{i}" for a in "MF" for i in range(3)])
+           + [f"EMY{u}" for u in range(5)] + [f"PR{a}{i}" for a in "MF" for i in range(4) if f"PR{a}{i}" in chase_sheet.syms])
 boss_sheet("cock", cock_sheet, CLOUDS_ALL + ["EL_TOW", "EM", "ES", "EXS", "EXXS"])
 with open(f"{OUT}/boss.inc", "w") as fo:
-    fo.write("; generated by tools/gen_assets.py (boss v1)\n")
-    fo.write(f"BOSS_NCELL = {len(cell_keys)}\nBOSS_EYE_DY = {boss_art.GEM[1] - boss_art.EYE_Y}\n")
+    fo.write("; generated by tools/gen_assets.py (boss v1.2)\n")
+    fo.write(f"BOSS_EYE_DY = {boss_art.GEM[1] - boss_art.EYE_Y}\n")
     for view in ("chase", "cock"):
-        b, rows = boss_out[view]
+        b, rows, used, tabs_ = boss_out[view]
         fo.write(f"BossRows_{view}: .byte " + ",".join(str(r) for r in rows) + f"\nBOSS_NROWS_{view.upper()} = {len(rows)}\n")
-        fo.write(f"BossCells_{view}:   ; dx, dy (from the gem), tile arms-down, tile arm-raised (left half; right = h-flip)\n")
-        for k in cell_keys:
-            c, r = k
-            td = b.syms[f"BD{c}{r}"] if k in cells_d else 0xFFFF
-            tu = b.syms[f"BU{c}{r}"] if f"BU{c}{r}" in b.syms else td
-            dx = c * 16 - boss_art.GEM[0]; dy = r * 16 - boss_art.GEM[1]
-            fo.write(f"  .word ${dx & 0xFFFF:04X}, ${dy & 0xFFFF:04X}, ${td:04X}, ${tu:04X}\n")
     def bgr(h): r, g, b_ = (int(h[i:i + 2], 16) for i in (1, 3, 5)); return (r >> 3) | ((g >> 3) << 5) | ((b_ >> 3) << 10)
     fo.write("BossPal: .word " + ",".join(f"${bgr(h):04X}" for h in boss_art.BOSS_PAL) + "\n")
     fo.write("NavyPal: .word " + ",".join(f"${bgr('#%02x%02x%02x' % c):04X}" for c in CGRAM[240:256]) + "\n")
+with open(f"{OUT}/boss_parts.inc", "w") as fo:
+    fo.write("; generated by tools/gen_assets.py: boss part OAM lists (boss v1.2, tools/boss_vox.py)\n")
+    fo.write(f"BP_NIDS = {len(BV_IDS)}\n")
+    xs, ys = [], []
+    for view in ("chase", "cock"):
+        b, rows, used, tabs_ = boss_out[view]
+        fo.write(f"BPIdx_{view}:   ; per logical part id: offset into BPData, entries, fast-path sx / sy range\n")
+        M = 3   # animation offsets (bob, recoil) stay inside this margin
+        for n in used:
+            e = tabs_[n]
+            x0 = -min(dx for dx, dy, w in e) + M; x1 = 256 - max(dx + 16 for dx, dy, w in e) - M
+            y0 = -min(dy for dx, dy, w in e) + M; y1 = 224 - max(dy + 16 for dx, dy, w in e) - M
+            fo.write(f"  .word BPL_{view}_{n.replace('-', 'm')}-BPData, {len(e)}, " + ", ".join(f"${v & 0xFFFF:04X}" for v in (x0, x1, y0, y1)) + "\n")
+    fo.write("BPData:\n")
+    for view in ("chase", "cock"):
+        b, rows, used, tabs_ = boss_out[view]
+        for n, ent in tabs_.items():
+            fo.write(f"BPL_{view}_{n.replace('-', 'm')}:\n")
+            for dx, dy, w in ent:
+                xs += [dx, dx + 16]; ys += [dy, dy + 16]
+                fo.write(f"  .word ${(dy * 256 + dx) & 0xFFFF:04X}, ${dx & 0xFFFF:04X}, ${dy & 0xFFFF:04X}, ${w:04X}\n")
+    fo.write(f"BOSS_FAST_X0 = {-min(xs) + M}\nBOSS_FAST_X1 = {256 - max(xs) - M}\nBOSS_FAST_Y0 = {-min(ys) + M}\nBOSS_FAST_Y1 = {224 - max(ys) - M}\n")
+    fo.write(f"BOSS_MAXN = {max(sum(len(boss_out['chase'][3][n]) for n in grp) for grp in [['body', 'head18', 'armL_spread', 'armR_spread'], ['body_dmg', 'head36', 'armL_spread', 'armR_spread'], ['body', 'head0', 'armL_cannon', 'armR_cannon']])}\n")
+    print("boss parts: x", min(xs), max(xs), "y", min(ys), max(ys))
+
+# ----------------------------------------------------------------- v1.2 tumbling objects (streamed 16x16 frames)
+# Debris chunks, missiles, power-up capsules and the boss's crest shards are small voxel models; 8 frames each
+# (tumble / roll / spin) live in ROM and the NMI streams the current one over the object's sheet tiles.
+TUMBLE_NAMES = list(tumble_cfg.TUMBLE)
+tb = bytearray()
+for k in TUMBLE_NAMES:
+    for g in TUMBLE_FR[k]:
+        tb += to4bpp(g[:8, :8]) + to4bpp(g[:8, 8:]) + to4bpp(g[8:, :8]) + to4bpp(g[8:, 8:])
+open(f"{OUT}/tumble.bin", "wb").write(tb)
+def _tt(view, names, off=0):
+    return [(symbols[f"T_{view.upper()}_{n}"] + off, TUMBLE_NAMES.index(n)) for n in names if f"T_{view.upper()}_{n}" in symbols]
+_tch = _tt("chase", ["DEB0", "DEB1", "MSL", "EMSL", "PU_P", "PU_M", "PU_S"])
+_tco = _tt("cock", ["DEB0", "MSL", "EMSL", "PU_P", "PU_M", "PU_S"])
+_tov = _tt("over", ["DEB0", "DEB1"], 17)          # (overhead: 32x32 frames with the 16x16 art in the middle)
+with open(f"{OUT}/tumble.inc", "w") as fo:
+    fo.write("; generated by tools/gen_assets.py: v1.2 tumbling frame targets (sheet tile, frame set)\n")
+    for nm, lst in (("TbChase", _tch), ("TbChaseB", _tch + _tt("chase", ["BSHARD"])), ("TbCock", _tco),
+                    ("TbCockB", _tco + _tt("cock", ["BSHARD"])), ("TbOver", _tov)):
+        fo.write(f"{nm}: .word {len(lst)}" + "".join(f", {t}, {i}" for t, i in lst) + "\n")
+print("tumble:", len(TUMBLE_NAMES), "sets,", len(tb), "bytes")
 
 # ----------------------------------------------------------------- BG2 tiles: font + cockpit art
 FONT_CHARS = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-:/.!>"
@@ -1203,7 +1334,7 @@ STAGES = [
        dark="#3c2a1a", plaza="#e2d2b0"),
        band=["#000000", "#a8704a", "#d4a070", "#f6dcb4"], cloud=(1.0, 0.9, 0.76),
        sky=[(0.0, "#2a58b0"), (0.40, "#5a88cc"), (0.72, "#b8b498"), (0.90, "#ecd0a0"), (1.0, "#f8e2b8")],
-       haze=(1.0, 0.72, 0.72, 20)),
+       haze=(1.0, 0.72, 0.72, 20), pal6=["#5a3a1e", "#8a6034", "#c09050", "#ecc890", "#7a4a32", "#b0785a", "#ffe070", "#2a2018"]),
   dict(name="ARCTIC FRONT", map=1, water="#143658", ground=dict(
        deep3="#0e2a46", deep="#143658", deep2="#1a4268", swell="#2a5a82", crest="#6c9ec2", fleck="#cce6f6", white="#ffffff",
        shal1="#3c7ca2", shal2="#5c9ec2", shal3="#8ec6de", shal4="#bae2f0", foam="#f0f8fc",
@@ -1215,7 +1346,7 @@ STAGES = [
        road1="#8c949e", road2="#4c545e", roof3="#ffffff", dark="#1a2430", plaza="#d8e0e8"),
        band=["#000000", "#8ea8c4", "#cadaea", "#ffffff"], cloud=(0.94, 0.97, 1.0),
        sky=[(0.0, "#46669a"), (0.40, "#7898c2"), (0.75, "#b8cce2"), (1.0, "#f2f8fc")],
-       haze=(0.9, 1.0, 1.0, 22)),
+       haze=(0.9, 1.0, 1.0, 22), pal6=["#14301e", "#2a5a3a", "#4e8a5e", "#9ccaa8", "#8eb8d4", "#f0f8ff", "#ffe070", "#1a3a5a"]),
   dict(name="NIGHT RAID", map=0, water="#040c1e", ground=dict(
        deep3="#020814", deep="#040c1e", deep2="#061428", swell="#0a1c36", crest="#1c3664", fleck="#4c70a6", white="#a4bce4",
        shal1="#08183a", shal2="#0c2246", shal3="#123052", shal4="#1c405e", foam="#3c5c7c",
@@ -1228,7 +1359,8 @@ STAGES = [
        dark="#080808", plaza="#86643e", tarmac="#12161a", tarm2="#ff3a30"),
        band=["#000000", "#0a1430", "#16244a", "#34446e"], cloud=(0.36, 0.42, 0.58),
        sky=[(0.0, "#000004"), (0.50, "#040a20"), (0.85, "#0e1e48"), (1.0, "#283a6a")],
-       haze=(0.2, 0.5, 0.5, 9)),
+       haze=(0.2, 0.5, 0.5, 9), pal6=["#0c1208", "#18220e", "#263418", "#3a4a28", "#2c3038", "#464c58", "#ffe070", "#0a1428"],
+       night=True),
 ]
 def sky_words(stops):
     out = []
@@ -1260,6 +1392,13 @@ for st in STAGES:
         for i, c in enumerate(st["band"]): cg[28 + i] = hexrgb(c)
     for i in range(1, 16):
         r_, g_, b_ = CGRAM[144 + i]; k = st["cloud"]; cg[144 + i] = (int(r_ * k[0]), int(g_ * k[1]), int(b_ * k[2]))
+    for i, c in enumerate(st.get("pal6", [])): cg[232 + i] = hexrgb(c)
+    if st.get("night"):      # v1.2: sprites darken at night (moonlit blue); lamps, flames, windows stay lit
+        keep = {128: (8, 9, 13, 14, 15), 176: (6, 7, 14), 224: (6, 7, 14) + tuple(range(8, 14)), 240: (14, 15)}
+        for base_, kp in keep.items():
+            for i in range(1, 16):
+                if i in kp: continue
+                r_, g_, b_ = cg[base_ + i]; cg[base_ + i] = (int(r_ * 0.55), int(g_ * 0.62), int(min(255, b_ * 0.8 + 6)))
     pal = b"".join(struct.pack("<H", bgr555(c)) for c in cg)
     sw = sky_words(st["sky"])
     wt = bgr555(hexrgb(st["water"]))
@@ -1302,10 +1441,10 @@ FRAMES = ["EL_TOW", "EL_AWAY", "EM", "EM_BANK", "ES", "EXS", "EXXS", "X32A", "X3
           "BORB0", "BORB1", "BSHARD",
           "BOMB_N", "BOMB_F", "FORT_C", "FORT_W", "PU_P", "PU_M", "PU_S", "HSPARK",
           "EMY0", "EMY1", "EMY2", "EMY3", "EMY4", "SLOT0", "SLOT1", "SLOT2", "SLOT3", "SLOT4", "SLOT5",
-          "PRM0", "PRM1", "PRM2", "PRF0", "PRF1", "PRF2", "EM"]
+          "PRM0", "PRM1", "PRM2", "PRM3", "PRF0", "PRF1", "PRF2", "PRF3", "EM"]
 BIG32 = ("EL_TOW", "EL_AWAY", "X32A", "X32B", "BOMB_N", "FORT_C", "FORT_W", "SLOT0", "SLOT1", "SLOT2", "SLOT3", "SLOT4", "SLOT5")
 _V11S = {f"EMY{u}": "EM" for u in range(5)}; _V11S.update({f"SLOT{k}": "EL_TOW" for k in range(6)})
-_V11S.update({f"PR{a}{i}": "EXXS" for a in "MF" for i in range(3)})
+_V11S.update({f"PR{a}{i}": "EXXS" for a in "MF" for i in range(4)})
 SUBST = {"cock": {"HSPARK": "X16A", "X16C": "X16B", "PUFF": "EXXS", "EL_AWAY": "EL_TOW", "EM_BANK": "EM", "DEB1": "DEB0", "TOP0": "EM", "TOP1": "EM", "TOP2": "EM"},
          "chase": {"TOP0": "EMY4", "TOP1": "EMY4", "TOP2": "EMY4", "EM": "EMY4", "EL_AWAY": "EL_TOW", "EM_BANK": "EMY2"},
          "over": {"BOMB_N": "TOP0", "BOMB_F": "TOP0", "FORT_C": "TOP0", "FORT_W": "TOP0", "PU_P": "X16A", "PU_M": "X16A",

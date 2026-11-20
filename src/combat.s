@@ -1625,6 +1625,8 @@ ProjectObjects:
   sta o_a
   lda #F_MSL
   jsr AddObj
+  lda #4
+  tsb tb_bld
   lda #0
   jsr TrailEmit
 @nomsl:
@@ -1633,7 +1635,9 @@ ProjectObjects:
   ldx #0
 @d:
   lda de_t,x
-  beq @dn
+  bne @rf41943
+  jmp @dn
+@rf41943:
   stx c_i
   lda de_x,x
   ASR4
@@ -1668,6 +1672,8 @@ ProjectObjects:
   clc
   adc #F_DEB0
   jsr AddObj
+  lda #3
+  tsb tb_bld
 @dn0:
   ldx c_i
 @dn:
@@ -1741,6 +1747,8 @@ ProjectObjects:
   ora obj_pri
   ora #$0E
   sta o_a
+  lda #$80
+  tsb tb_bld
   lda #F_BSHARD
   bra :++
 : lda t1
@@ -1792,6 +1800,8 @@ ProjectObjects:
   sta o_a
   lda #F_EMSL
   jsr AddObj
+  lda #8
+  tsb tb_bld
   lda c_i
   clc
   adc #2
@@ -1981,6 +1991,8 @@ ProjectOver:
   sta o_a
   lda #F_DEB0
   jsr AddObj
+  lda #3
+  tsb tb_bld
 @dn0:
   ldx c_i
 @dn:

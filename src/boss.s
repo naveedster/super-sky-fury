@@ -6,7 +6,6 @@
 ;  Music: the SPC700 is rebooted and the boss song is uploaded in the main loop's idle time.
 ; =====================================================================
 .include "../assets/boss.inc"
-.include "../assets/boss_fast.inc"
 .include "../music/build/boss_up.inc"
 .include "../music/build/field_up.inc"
 .include "../music/build/title_up.inc"
@@ -778,9 +777,6 @@ PatTab:  .word ATK_CANNON, ATK_CANNON, ATK_VOLLEY
          .word ATK_SHARD, ATK_CANNON, ATK_BEAM, ATK_VOLLEY, ATK_SHARD, ATK_CANNON
 GapTab:  .word 96, 76, 60
 NShot:   .word 3, 5, 7
-BossFastIdx: .repeat 8, I
-  .word I*BOSS_FAST_N*4
-.endrepeat
 NMsl:    .word 2, 3, 4
 
 BossAttack:
@@ -1733,152 +1729,7 @@ BossDraw:
   clc
   adc b_sx
   sta b_sx
-: lda obj_pri
-  ora #$0E                   ; palette 7
-  sta t7
-  ; fast path (whole body on screen, room in OAM): precomputed (dy<<8)+dx and tile/attr words
-  lda b_sx
-  cmp #BOSS_FAST_X0
-  bmi @slow
-  cmp #BOSS_FAST_X1+1
-  bpl @slow
-  lda b_sy
-  cmp #BOSS_FAST_Y0
-  bmi @slow
-  cmp #BOSS_FAST_Y1+1
-  bpl @slow
-  lda oam_idx
-  cmp #512-BOSS_FAST_N*4+1
-  bcs @slow
-  lda b_sy
-  xba
-  and #$FF00
-  clc
-  adc b_sx
-  sta bd_dx                  ; (sy<<8)+sx
-  lda obj_pri
-  xba
-  and #$FF00
-  sta bd_t                   ; priority bits into the attr byte
-  lda b_arm
-  and #3
-  ldx view
-  cpx #VIEW_COCK
-  bne :+
-  ora #4
-: asl
-  tax
-  lda f:BossFastIdx,x
-  tax
-  clc
-  adc #BOSS_FAST_N*4
-  sta bd_offl                ; end offset
-  ldy oam_idx
-@fl:
-  lda f:BossFast_chase_0,x
-  clc
-  adc bd_dx
-  sta oam_lo,y
-  lda f:BossFast_chase_0+2,x
-  ora bd_t
-  sta oam_lo+2,y
-  iny
-  iny
-  iny
-  iny
-  inx
-  inx
-  inx
-  inx
-  cpx bd_offl
-  bne @fl
-  sty oam_idx
-  jmp @rf97377
-@slow:
-  lda t7
-  ora #$40
-  sta bd_atr                 ; right half: h-flipped
-  lda b_arm                  ; tile column per half: +4 arms down, +6 arm raised
-  and #1
-  asl
-  ora #4
-  sta bd_offl
-  lda b_arm
-  and #2
-  ora #4
-  sta bd_offr
-  ldx #0                     ; cell table offset
-  lda view
-  cmp #VIEW_COCK
-  bne :+
-  ldx #(BossCells_cock-BossCells_chase)
-: stx t6
-  lda #BOSS_NCELL
-  sta c_j
-  ldy oam_idx                ; Y = OAM write index for the whole body (perf: no per-piece JSR)
-@c:
-  ldx t6
-  lda f:BossCells_chase+2,x
-  clc
-  adc b_sy
-  sta sy
-  clc
-  adc #16
-  cmp #240
-  bcc :+
-  jmp @nx                    ; the whole row is off screen vertically
-: lda f:BossCells_chase,x
-  sta bd_dx
-  ; left half
-  txa
-  clc
-  adc bd_offl
-  tax
-  lda f:BossCells_chase,x
-  cmp #$FFFF
-  beq @right
-  sta stile
-  lda bd_dx
-  clc
-  adc b_sx
-  sta sx
-  clc
-  adc #16
-  cmp #272
-  bcs @right
-  lda t7
-  jsr BossPut
-@right:
-  lda t6
-  clc
-  adc bd_offr
-  tax
-  lda f:BossCells_chase,x
-  cmp #$FFFF
-  beq @nx
-  sta stile
-  lda bd_dx
-  eor #$FFFF
-  sec
-  sbc #15                    ; -dx - 16
-  clc
-  adc b_sx
-  sta sx
-  clc
-  adc #16
-  cmp #272
-  bcs @nx
-  lda bd_atr
-  jsr BossPut
-@nx:
-  lda t6
-  clc
-  adc #8
-  sta t6
-  dec c_j
-  beq :+
-  jmp @c
-: sty oam_idx
+: jsl X_BossDraw            ; v1.2: sprite-stacked part groups (v11.s)
 @rf97377:
   ; thrusters under the boots (cloud palette: orange / yellow)
   lda frame

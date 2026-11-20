@@ -32,7 +32,7 @@ before += [rgb(G["render_enemy_poly"]("chase", 0, y, 32, 1.02), PE) for y in (18
 before += [rgb(G["render_bomber_poly"](32, 0.98), PE)]
 after_j = [rgb(f, PJ) for f in G["jet_frames"]]
 after_e = [rgb(f, PE) for f in G["EN_YAWS"]]
-after_p = [rgb(G["PROP_NEAR"][t][d], PO) for t in range(3) for d in (0, 2, 4, 6)]
+after_p = [rgb(G["PROP_NEAR"][t][d], PO) for t in (0, 2, 3) for d in (0, 2, 4, 6)]
 after_b = [rgb(G["render_bomber"](32, 0.98), PE)]
 rows = [("BEFORE (v1.1 polygon renders): jet 3 banks, enemy toward/away, bomber", strip(before, 64)),
         ("AFTER: voxel sprite-stacked jet, 5 banks x level / climb / dive (one streamed 64x64 VRAM slot)", strip(after_j[:5], 64)),
@@ -60,7 +60,7 @@ Image.fromarray(sheet).save(os.path.join(out_dir, "sprite_stack_before_after.png
 # ---------------------------------------------------------------- turntable mp4
 fr_dir = tempfile.mkdtemp()
 VJ, VE, VB = G["VOX_JET"], G["VOX_EN"], G["VOX_BOMB"]
-P = G["PROPS"]
+P = G["PROPS12"]
 N = 360
 for i in range(N):
     yaw = i * 360.0 / 120          # 3 turns
@@ -69,7 +69,7 @@ for i in range(N):
     j = rgb(vs.render(VJ, G["JET_RAMPS"], "chase", roll=roll, yaw=yaw, pitch_cam=38, size=64, scale=1.9, oy=-2), PJ)
     e = rgb(vs.render(VE, G["EN_RAMPS"], "chase", yaw=k16, size=32, scale=1.02), PE)
     b = rgb(vs.render(VB, G["EN_RAMPS"], "chase", yaw=k16, pitch_cam=52, size=32, scale=0.98), PE)
-    ps = [rgb(vs.render(P[t], vs.PROP_RAMPS, "chase", yaw=k16, pitch_cam=30, size=32, scale=1.4, oy=13, flat_top=0.18), PO) for t in G["PROP_TYPES"]]
+    ps = [rgb(G["render_prop"](t, k16, 32, 1.4, 30), PO) for t in ("carrier", "oilrig", "bunker")]   # (v1.2 models)
     top = pad_to(j, 72, 96); bot = strip([e, b] + ps, 40)
     img = np.vstack([pad_to(top, 72, bot.shape[1]), bot])
     img = up(img, 5)

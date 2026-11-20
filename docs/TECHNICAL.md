@@ -9,6 +9,72 @@ that name. The public overview is in the [README](../README.md).
 > They are excluded by `.gitignore` and are not in the repository. The release ROM is
 > `dist/super_sky_fury.sfc`. Current music renders are `music/{title,stage,boss,boss_victory}.{mp3,spc}`.
 
+## v1.2: more sprite stacking
+
+**Boss.** `tools/boss_vox.py` rebuilds the `boss_art.py` parts as voxels. Each part is extruded
+with its own depth profile (blades, cylinders, domes), and decal plates carry the visor, eyes,
+and collar. Seams between parts come from part IDs, with gamma 1.8 and a light from the upper
+left. Every frame is rendered at 208x208, anchored at the chest gem:
+* the body, plus a damaged body (holes, scorch rims, soot near 4 spots)
+* the head at 0/18/36 degrees (mirrored for left), rendered in a scene with the body so the
+  shoulder pads hide the crest correctly
+* the arms in down, cannon, and spread poses
+
+`gen_assets.py` cuts the frames into 16x16 cells. It dedupes identical and mirrored cells and
+writes `boss_parts.inc`, a per-part cell list with bounds for a fast path when the part is fully
+on screen. `X_BossDraw` (src/v11.s) draws the head, left arm, right arm, then the body:
+* The head yaw follows `b_sx`, one step every 8 frames.
+* The arms are spread during the beam and shard attacks and in cannon pose when that side fires.
+  The firing arm recoils 3 px.
+* The body uses the damaged frame below 1/3 HP.
+
+The cockpit sheet only has room for the body, the forward head, and the down and cannon arms.
+The world-space hit boxes are unchanged.
+
+**Tumbling objects.** `voxstack.tumble_models()` and `tools/tumble_cfg.py` define 8 frame sets
+(DEB0, DEB1, MSL, EMSL, PU_P, PU_M, PU_S, BSHARD), each 8 frames of 16x16 (`tumble.bin`, bank
+$8F). The sheet keeps one frame of each set. `X_Tumble` (NMI, after `X_Stream`) refreshes it:
+* It handles only sets drawn in the committed frame (`tb_cur`, set by `tsb tb_bld` at the
+  `AddObj` sites).
+* Animation runs at 7.5 fps, with at most one 128-byte upload per vblank, inside the line budget.
+* It returns at once when nothing has changed in this phase.
+
+**Ground props.** `voxstack.prop_models_v12()` has 13 models. Each stage maps four slots
+(0 water, 1 nature, 2 structure, 3 military) to models (`STAGE_PROPS`, `StageMod`).
+* Near frames (16 yaws, 32x32) are in banks $90-$93 and streamed through the six 32x32 slots.
+* Mid and far frames (16x16) are uploaded per stage by `X_ViewLoad` (`PropMid`).
+* Palette 6 colours 8-15 are set per stage in the stage CGRAM image.
+* Bases are 9 per map: the airfield, towns, and open land, plus 3 on open water.
+* Prop offsets are pre-rotated for all 256 headings (`PropRot`, banks $94/$95, read through a
+  long pointer in direct page). This replaces four multiplies per prop.
+* Bases more than 64 px behind the camera's half-plane skip the centre rotation.
+* `PRB` dropped from 105 to 90 lines.
+
+**Shootable props.** `PropHit` runs during the projection pass, every other frame. It tests
+your rounds against each drawn military prop within 22 px of depth (one 2-frame bullet step)
+and 18 px of lateral distance (+24 px for spread lanes). There is no altitude test, so strafing
+counts. Each hit gives a spark and a K_FIX-panned tink. The third hit sets the prop's bit in
+`pr_dead` (cleared on a stage change or restart), spawns a T_BIGBOOM explosion slot on the ground
+(speed 0, so it stays put, with stereo tracking), and gives +300 points (`T_ScoreAdd`).
+
+**Night.** The stage-4 CGRAM image darkens OBJ palettes 0, 3, 6, and 7 (x0.55 R, x0.62 G,
+x0.8 B). Lamp, flame, window, and HUD colours keep their values.
+
+**ROM.** The ROM is now 1 MB (header $0A, version $02), and banks $90-$95 are used.
+
+**Performance (v1.2 vs v1.1).** The ring harness (`progress/v12/rcm.sh`) runs a RING SKIPTITLE
+build over 18 input shifts of each stress script. "Over 262" and "over 250" are frame counts
+above those lines.
+
+| Script | v1.1 over 262 | v1.1 over 250 | v1.1 mean | v1.2 over 262 | v1.2 over 250 | v1.2 mean |
+|---|---|---|---|---|---|---|
+| sa0 (dense) | 330 | 2170 | 181.2 | 376 | 2145 | 186.2 |
+| sa1 | 15 | 28 | 143.3 | 19 | 33 | 143.6 |
+| sa2 | 46 | 64 | 162.6 | 46 | 78 | 163.3 |
+
+The boss test run (`tools/dev/boss_v12.txt`, frames 900 and later) had 5 frames over 262 (v1.1:
+3), with mean lines 141.5 (v1.1: 130.9).
+
 ## v1.1: stages, variety, hit feedback, sprite stacking
 
 Most v1.1 code lives in `src/v11.s` (bank $8C, called through `jsl` hooks and `T_x` trampolines into bank 0).

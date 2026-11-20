@@ -37,11 +37,14 @@ SNES emulator.
 * **Hit feedback**: impact sparks, white hit flashes, knockback jolts, hit-stop, floating damage
   numbers, smoke and scorch marks on damaged armour, a boss bar with a lagging damage segment, bigger
   effects for missiles and weak points, and panned hit sounds.
-* **Sprite-stacked 3D sprites**: the player jet, the enemy planes, and ground props (towers, fuel
-  tanks, AA bunkers standing on the Mode 7 plane) are small voxel models rendered offline by
-  sprite stacking at 16 headings (plus bank and climb/dive frames for your jet). The game picks the
+* **Sprite-stacked 3D sprites**: the player jet, the enemy planes, the robot boss, tumbling debris,
+  missiles and power-up capsules, and each stage's ground props (carriers, oil rigs, palm islands,
+  pyramids, mesas, radar stations, tanks, icebergs, snow pines, igloo bases, gun turrets, lit
+  skyscrapers) are small voxel models rendered offline by sprite stacking. The game picks the
   frame from the object's heading relative to the camera and streams only the frames in use to VRAM.
-* **Boss fight**: a giant robot with weak points, three attack phases, and its own music.
+* **Ground attack**: AA bunkers, tanks, and turrets can be shot (3 hits) for 300 points.
+* **Boss fight**: a giant sprite-stacked robot whose head tracks you and whose arms swing into
+  cannon and spread poses, with weak points, three attack phases, and its own music.
 * **Original 16-bit soundtrack**: title, stage, and boss themes plus a victory jingle on a
   custom SPC700 sound driver. Sound effects are hard-panned and moving (STEREO by default, with
   a MONO option).
@@ -55,7 +58,7 @@ SNES emulator.
   | NORMAL | 5 | standard | standard |
   | HARD | 3 | higher | faster |
 
-* Runs at a steady **60 fps** on a stock console: 512 KB LoROM/FastROM, no enhancement chip,
+* Runs at a steady **60 fps** on a stock console: 1 MB LoROM/FastROM, no enhancement chip,
   NTSC.
 
 | Menu | Options | Credits |
@@ -133,6 +136,30 @@ For the full test methodology and the hardware-safety rules the code follows, se
 [docs/TECHNICAL.md](docs/TECHNICAL.md).
 
 ## Changelog
+
+### v1.2 (2026-11-20)
+
+* **Sprite-stacked robot boss**: the boss is now a voxel model (`tools/boss_vox.py`) built as
+  separate layers: a body with the chest gem, a head with the spiky crest that turns toward you
+  (5 headings), and arms with down, cannon (the firing arm recoils), and spread poses. The arms
+  "breathe" while idle. The damaged body has holes, scorch rims, and soot streaks, on top of the
+  scorched palette, smoke, and sparks. The hit boxes (gem, eyes, body) are unchanged.
+* **Tumbling objects**: debris chunks, your missiles, enemy missiles, the P/M/S capsules, and the
+  boss's crest shards tumble or roll through 8 sprite-stacked frames each. A frame is only streamed
+  when an object of that kind is on screen, at most one per vblank.
+* **Ground props per stage**: 13 new voxel models with 16 headings and 3 distance sizes. OCEAN has
+  carriers, oil rigs, palm islands, and AA bunkers. DESERT has pyramids, mesas, radar stations, and
+  tanks. ARCTIC has icebergs, snow pines, igloo bases, and gun turrets. NIGHT has lit skyscrapers.
+  Props now also stand on open water. Each stage recolours the prop palette.
+* **Shootable ground targets**: bunkers, tanks, and turrets take 3 hits (spark and metallic tink on
+  each hit). Then they go up in a fireball that stays on the ground, with a panned explosion and
+  +300 points. They stay destroyed until the next stage.
+* **Night palettes**: in NIGHT RAID your jet, the enemies, and the props are drawn darker and bluer,
+  while lamps, flames, and windows stay lit.
+* **Performance**: prop offsets are pre-rotated for all 256 headings (a table in ROM instead of
+  four multiplies per prop), bases behind the camera are skipped, and the prop frame budget is
+  tighter. Scripted stress runs stay close to v1.1 (see TECHNICAL.md).
+* The ROM is now 1 MB (prop frames live in banks $90-$95).
 
 ### v1.1 (2026-11-20)
 

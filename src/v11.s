@@ -27,9 +27,16 @@ GL_BLANK = 24
 
 SS_SLOTS = 6                ; v1.1 sprite-stack 32x32 stream slots
 .ifndef PRB
-PRB = 105
+PRB = 90                    ; (v1.2: 105 -> 90 to pay for tumbling + more props)
 .endif
+.ifndef PR_EVERY
+PR_EVERY = 2                ; ground props: full projection every n frames (2 or 4)
+.endif
+.ifndef PR_MAX
 PR_MAX = 4                  ; ground props drawn per frame
+.endif
+.segment "ZEROPAGE"
+pr_rp:   .res 3             ; v1.2: long pointer to this heading's PropRot row
 .segment "BSS"
 en_hp:  .res NEN*2
 en_mx:  .res NEN*2
@@ -98,6 +105,7 @@ bu_ln:  .res NBU*2          ; bullet lanes (1 centre, 2 left, 4 right)
 x_bx:   .res 2
 q_xy:   .res 2
 x_dx:   .res 2
+x_j:    .res 2
 x_of:   .res 2
 x_so:   .res 2
 x_ln:   .res 2
@@ -153,6 +161,37 @@ pr_cz:   .res 2
 pr_cx:   .res 2
 pr_t:    .res 2
 pr_sg:   .res 2
+b_hy:    .res 2             ; v1.2 boss head yaw (part id 2..6)
+tb_i:    .res 2             ; (NMI-private) tumble round robin
+tb_n:    .res 2
+tb_bld:  .res 2             ; tumbling sets drawn by the frame being built (bit = set) / by the committed one
+tb_cur:  .res 2
+tb_tab:  .res 2
+tb_hv:   .res 16            ; frame in VRAM per list entry ($FFFF unknown)
+tb_ph:   .res 2             ; phase whose lap found nothing to upload ...
+pr_ax:   .res 2
+.ifdef PROPDBG
+pd_proj: .res 2
+pd_box:  .res 2
+pd_rot:  .res 2
+pd_scan: .res 2
+pd_acc:  .res 2
+.endif
+;            ; v1.2: base cull axis (0 cos-major: dy, 2 sin-major: dx)
+pr_dead: .res 10            ; v1.2: destroyed military props (bit per PropOff entry)
+pr_hid:  .res 2             ; last prop hit (PropOff offset) ...
+pr_hc:   .res 2             ; ... and its hits so far
+.ifdef PROPTEST
+pr_dbg:  .res 2
+pr_dbz:  .res 2
+pr_dbb:  .res 2
+.endif
+tb_pc:   .res 2             ; ... with these sets drawn
+bp_n:    .res 2             ; (X_BossDraw scratch)
+bp_sx:   .res 2
+bp_sy:   .res 2
+bp_k:    .res 2
+bp_l:    .res 4
 
 ; ---------------------------------------------------------------- bank-0 trampolines
 .segment "CODE"
@@ -194,6 +233,15 @@ T_RelTrig:   jsr RelTrig
              rtl
 T_LoadNow:   jsr LoadNow
              rtl
+T_ScoreAdd:  clc                 ; v1.2: A = points (x100) -> score, HUD, extra lives
+             adc score
+             cmp #10000
+             bcc :+
+             lda #9999
+:            sta score
+             jsr ScoreText
+             jsr ScoreLife
+             rtl
 
 .segment "XCODE"
 .a16
@@ -214,6 +262,7 @@ X_Restart:                  ; (RestartGame: back to stage 1, reload the world if
 : rtl
 
 ResetRun:
+  jsr PrRevive
   lda #$0F
   sta bright
   stz stage
@@ -361,7 +410,7 @@ X_SpawnInit:
   asl
   clc
   adc #60
-  cmp #200
+  cmp #400
   bcc :+
   lda #200
 : sta en_hp,x
@@ -2103,6 +2152,8 @@ X_Project:
   clc
   adc #F_PU_P
   jsr AddO
+  lda #$70
+  tsb tb_bld
 @pun0:
   ldx x_i
 @pun:
@@ -2484,6 +2535,7 @@ StageStep:
 
 ; black screen: new palette / map / sky / haze (LoadView does the uploads), banner, fade in
 StageApply:
+  jsr PrRevive
   lda st_next
   sta stage
   jsl T_LoadView
@@ -2496,8 +2548,65 @@ StageApply:
   rts
 
 ; LoadView (force blank, NMI off), at the end: this stage's CGRAM / Mode 7 map, sky + haze HDMA
+PropMidT: .word T_CHASE_PRM0, T_CHASE_PRM1, T_CHASE_PRM2, T_CHASE_PRM3, T_CHASE_PRF0, T_CHASE_PRF1, T_CHASE_PRF2, T_CHASE_PRF3
 X_ViewLoad:
   jsr SS_Reset               ; the OBJ sheet was just reloaded
+  lda view                   ; v1.2: chase field sheet -> this stage's mid / far ground prop frames
+  bne @np
+  lda b_gfx
+  bne @np
+  A8
+  lda #$80
+  sta VMAIN
+  lda #$01
+  sta DMAP0
+  lda #$18
+  sta BBAD0
+  lda #^PropMid
+  sta A1B0
+  A16
+  lda stage
+  xba
+  asl
+  asl                        ; * 1024
+  clc
+  adc #.loword(PropMid)
+  sta n_t
+  ldy #0
+@pm:
+  tyx
+  lda f:PropMidT,x
+  asl
+  asl
+  asl
+  asl
+  clc
+  adc #$6000
+  sta n_k
+  ldx #2
+: lda n_k
+  sta VMADDL
+  clc
+  adc #16*16
+  sta n_k
+  lda n_t
+  sta A1T0L
+  clc
+  adc #64
+  sta n_t
+  lda #64
+  sta DAS0L
+  A8
+  lda #1
+  sta MDMAEN
+  A16
+  dex
+  bne :-
+  iny
+  iny
+  cpy #16
+  bne @pm
+@np:
   lda stage
   ldx #STAGE_SZ
   jsr XMul16                ; A = stage * STAGE_SZ (+ StageData)
@@ -2772,6 +2881,8 @@ SS_Reset:                    ; sheet (re)loaded from ROM: slots hold their place
   bne :-
   stz js_have
   stz js_want
+  lda #$FFFF                 ; v1.2: tumbling frames are back to frame 0 of the sheet: re-upload
+  sta tb_tab
   rts
 
 ; chase jet: frame from bank (|turnrate|, 5 steps) and climb / dive; h-flip when banking left
@@ -2941,6 +3052,206 @@ SlotGet:
   lda #$FFFF
   rts
 
+;
+; v1.2 shootable ground props --------------------------------------------------------
+Bit16: .word 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768
+; A = PropOff offset (8 per prop) -> X = pr_dead word offset, A = bit
+PrBit:
+  lsr
+  lsr
+  lsr
+  pha
+  and #15
+  asl
+  tax
+  lda f:Bit16,x
+  sta x_k
+  pla
+  lsr
+  lsr
+  lsr
+  and #$FFFE
+  tax
+  lda x_k
+  rts
+PrRevive:
+  ldx #8
+: stz pr_dead,x
+  dex
+  dex
+  bpl :-
+  lda #$FFFF
+  sta pr_hid
+  rts
+PROP_HP = 3
+; prop pr_i accepted for drawing at entry Y (pr_x, pr_z, sx, pr_gy): your rounds crossing it hit.
+; carry set = destroyed this frame.  Keeps Y.
+PropHit:
+  sty x_j
+.ifdef PROPTEST
+  inc pr_dbg
+.endif
+  lda pr_z
+  sec
+  sbc zoff
+  sta x_dx                   ; depth ahead of you
+  ldy #0
+@b:
+  lda bu_d,y
+  beq @n
+.ifdef PROPTEST
+  sta pr_dbb
+  lda x_dx
+  sta pr_dbz
+  lda bu_d,y
+.endif
+  sec
+  sbc x_dx
+  clc
+  adc #22
+.ifdef PROPTEST
+  cmp #600
+.else
+  cmp #44                    ; within ~ one 2-frame step of bullet travel
+.endif
+  bcs @n
+  lda bu_x,y
+  sec
+  sbc pr_x
+  jsr XAbs
+  sta x_bx
+  lda bu_ln,y                ; spread lanes widen the net
+  and #6
+  beq :+
+  lda x_bx
+  sec
+  sbc #24
+  bcc @hit
+  sta x_bx
+: lda x_bx
+.ifdef PROPTEST
+  cmp #400
+.else
+  cmp #18
+.endif
+  bcc @hit
+@n:
+  iny
+  iny
+  cpy #NBU*2
+  bne @b
+  ldy x_j
+  clc
+  rts
+@hit:
+  lda #0
+  sta bu_d,y                 ; the round is spent
+  lda pr_i
+  cmp pr_hid
+  beq :+
+  sta pr_hid
+  stz pr_hc
+: inc pr_hc
+  lda sx                     ; spark + tink where it struck
+  sta t0
+  lda pr_gy
+  sec
+  sbc #7
+  sta t1
+  lda #0
+  jsr FxAt
+  lda pr_x
+  sta sfx_nfx
+  lda x_dx
+  sta sfx_nfz
+  lda #K_FIX
+  sta sfx_nk
+  lda pr_hc
+  cmp #PROP_HP
+  bcs @kill
+  lda #SA_TINK
+  ldx #2
+  ldy #7
+  jsl T_SfxA
+  ldy x_j
+  clc
+  rts
+@kill:
+  lda pr_i                   ; down for this stage
+  jsr PrBit
+  ora pr_dead,x
+  sta pr_dead,x
+  lda #$FFFF
+  sta pr_hid
+  lda sx
+  sta t0
+  lda pr_gy
+  sec
+  sbc #8
+  sta t1
+  lda #1
+  jsr FxAt                   ; big flash
+  lda #4
+  jsr Shake
+  ldy #0                     ; a ground fireball that stays where the target stood
+: lda en_st,y
+  beq @ok
+  iny
+  iny
+  cpy #NEN*2
+  bne :-
+  bra @pts
+@ok:
+  sty x_i
+  lda #ST_BOOM
+  sta en_st,y
+  lda #T_BIGBOOM
+  sta en_ty,y
+  lda pr_x
+  asl
+  asl
+  asl
+  asl
+  sta en_x,y
+  lda x_dx
+  asl
+  asl
+  asl
+  asl
+  sta en_z,y
+  lda hcam
+  sec
+  sbc pr_ch
+  clc
+  adc #6
+  sta en_dh,y
+  lda #0
+  sta en_hd,y
+  sta en_hf,y
+  sta en_spd,y
+  sta en_t,y
+  lda sx
+  sta en_sx,y
+  lda pr_gy
+  sta en_sy,y
+  stx sfx_ni                 ; explosion follows the fireball (stereo)
+  tyx
+  stx sfx_ni
+  lda #K_EN
+  sta sfx_nk
+  lda #3                     ; +300
+  jsr ScorePop
+@pts:
+  lda #SB_BIG
+  ldx #3
+  ldy #50
+  jsl T_SfxB
+  lda #3
+  jsl T_ScoreAdd
+  ldy x_j
+  sec
+  rts
+
 ; ground props standing on the Mode 7 plane (chase view): towers, fuel tanks, AA bunkers.
 ; Same world -> camera rotation as the clouds; frame by distance (3 size steps) and, near, by the
 ; prop's heading relative to the camera (16 streamed yaw frames).
@@ -2954,9 +3265,12 @@ X_Props:
   beq :+
   stz pc_n
   jmp @x
-: lda pr_ph                  ; full projection every other frame; in between the props glide
-  eor #1
-  sta pr_ph
+: lda pr_ph                  ; full projection every PR_EVERY frames; in between the props glide
+  inc a
+  cmp #PR_EVERY
+  bcc :+
+  lda #0
+: sta pr_ph
   beq :+
   jmp @adv
 : jsl T_LoadNow
@@ -2969,6 +3283,40 @@ X_Props:
   lda f:CamH,x
   and #$00FF
   sta pr_ch                  ; camera height
+.ifdef PROPDBG
+  inc pd_proj
+.endif
+  lda abs_cos                ; v1.2: bases behind the camera's half-plane skip the rotation
+  cmp abs_sin
+  lda #0
+  bcs :+
+  lda #2
+: sta pr_ax
+  lda heading                ; this heading's pre-rotated prop offsets
+  xba
+  and #$00FF
+  pha
+  and #$007F
+  A8
+  sta WRMPYA
+  lda #NPROPS*2
+  sta WRMPYB
+  A16
+  nop
+  nop
+  lda RDMPYL
+  clc
+  adc #.loword(PropRot)
+  sta pr_rp
+  pla
+  asl
+  xba
+  and #$0001
+  clc
+  adc #^PropRot
+  A8
+  sta pr_rp+2
+  A16
   lda cur_map
   beq :+
   lda #NBASE*8
@@ -2989,6 +3337,21 @@ X_Props:
   bcc :+
   ora #$FC00
 : sta pr_dy
+.ifdef NOCULL
+  bra @dyk
+.endif
+  ldy pr_ax                  ; cos-major heading: behind when dy * sgn(cos) > 64
+  bne @dyk
+  bit cosv
+  bpl :+
+  eor #$FFFF
+  inc a
+: sec
+  sbc #65
+  bmi @dyk
+  jmp @bn
+@dyk:
+  lda pr_dy
   bpl :+
   eor #$FFFF
   inc a
@@ -3003,6 +3366,24 @@ X_Props:
   bcc :+
   ora #$FC00
 : sta pr_dx
+.ifdef NOCULL
+  bra @dxk
+.endif
+  ldy pr_ax                  ; sin-major heading: behind when dx * sgn(sin) < -64
+  beq @dxk
+  bit sinv
+  bpl :+
+  eor #$FFFF
+  inc a
+: clc
+  adc #64
+  bpl @dxk
+  jmp @bn
+@dxk:
+.ifdef PROPDBG
+  inc pd_box
+.endif
+  lda pr_dx
   bpl :+
   eor #$FFFF
   inc a
@@ -3041,6 +3422,9 @@ X_Props:
   bmi @bv
   jmp @bn
 @bv:
+.ifdef PROPDBG
+  inc pd_rot
+.endif
   ldx pr_b
   lda f:BaseMap0+4,x
   sta pr_k
@@ -3048,19 +3432,31 @@ X_Props:
   sta pr_i
 @pl:                         ; ---- props of this base: small offsets, rotated with 8-bit multiplies
   ldx pr_i
-  lda f:PropOff,x
-  ldy sinv
-  jsr PMul
-  sta pr_r0                  ; ox*S
-  lda f:PropOff+2,x
-  ldy cosv
-  jsr PMul
-  sta pr_r1                  ; oy*C
-  lda pr_cz
-  clc
-  adc pr_r0
-  sec
-  sbc pr_r1
+  lda f:PropOff+4,x          ; v1.2: destroyed military props stay down
+  cmp #3
+  bne @alv
+  txa
+  jsr PrBit
+  and pr_dead,x
+  beq :+
+  jmp @pn
+: ldx pr_i
+@alv:
+.ifdef PROPDBG
+  inc pd_scan
+.endif
+  txa                        ; v1.2: offsets rotated offline (PropRot): dz, dx bytes
+  lsr
+  lsr
+  tay
+  lda [pr_rp],y
+  sta pr_r1
+  and #$00FF
+  cmp #$0080
+  bcc :+
+  ora #$FF00
+: clc
+  adc pr_cz
   sta pr_z                   ; z = cz + ox*S - oy*C
   cmp #28
   bcs :+
@@ -3068,16 +3464,13 @@ X_Props:
 : cmp #400
   bcc :+
   jmp @pn
-: lda f:PropOff,x
-  ldy cosv
-  jsr PMul
-  sta pr_r0                  ; ox*C
-  lda f:PropOff+2,x
-  ldy sinv
-  jsr PMul
-  clc
-  adc pr_r0
-  clc
+: lda pr_r1
+  xba
+  and #$00FF
+  cmp #$0080
+  bcc :+
+  ora #$FF00
+: clc
   adc pr_cx
   sta pr_x                   ; x = cx + ox*C + oy*S
   bpl :+
@@ -3148,7 +3541,11 @@ X_Props:
   lda f:PropOff+4,x
   sta x_t                    ; type
   lda pr_hs
+.ifdef NOPNEAR
+  cmp #$7FFF
+.else
   cmp #12
+.endif
   bcc @mid
   ; near: 16 yaws, streamed (the mid-size frame stands in until the slot is loaded)
   lda f:PropOff+6,x
@@ -3168,14 +3565,15 @@ X_Props:
   lsr
   and #$000F
   sta pr_m
-  lda x_t
+  lda stage                  ; v1.2: this stage's model for the slot
   asl
   asl
+  adc x_t
   asl
-  asl
+  tax
+  lda f:StageMod,x
   clc
   adc pr_m
-  adc #SS_PR
   sta pn_u,y
 @mid0:
   lda x_t
@@ -3189,8 +3587,27 @@ X_Props:
   clc
   adc #F_PRF0
 @st:
+.ifdef PROPDBG
+  inc pd_acc
+.endif
   sta pn_fr,y
-  inc pr_n
+  lda x_t                    ; v1.2: military props take gunfire
+  cmp #3
+  bne :+
+  lda pr_hs
+  cmp #5
+  bcc :+
+.ifdef NOPHIT
+  clc
+.else
+  jsr PropHit
+.endif
+  bcc :+
+  lda #$FFFF                 ; destroyed: not drawn
+  sta pn_u,y
+  lda #F_X16C
+  sta pn_fr,y
+: inc pr_n
   lda pr_n
   cmp #PR_MAX
   bcc @pn
@@ -3239,12 +3656,20 @@ X_Props:
   sbc pc_sx,y
   cmp #$8000
   ror
+.if PR_EVERY = 4
+  cmp #$8000
+  ror
+.endif
   sta pr_m
   lda pn_gy,x
   sec
   sbc pc_gy,y
   cmp #$8000
   ror
+.if PR_EVERY = 4
+  cmp #$8000
+  ror
+.endif
   sta pr_k
   ply
   bra @vf
@@ -3303,6 +3728,9 @@ X_Props:
   dey
   bne :-
 @emit:                       ; ---- draw the list
+.ifdef NOPDRAW
+  jmp @x
+.endif
   stz pr_i
 @el:
   lda pr_i
@@ -3472,22 +3900,52 @@ X_Stream:
 @sl:
   lda ss_want,y
   cmp ss_have,y
-  beq @sn
+  bne @rf61857
+  jmp @sn
+@rf61857:
   cmp #$FFFF
-  beq @sn
+  bne @rf21295
+  jmp @sn
+@rf21295:
   jsr SS_Line
   cmp #27
-  bcs @r
-  A8
-  lda #^SlotFrames
-  sta A1B0
-  A16
+  bcc @rf29831
+  jmp @r
+@rf29831:
   lda ss_want,y
+  sec
+  sbc #SS_PR
+  bcs @spr
+  adc #SS_PR
   xba
   asl                        ; * 512
   clc
   adc #.loword(SlotFrames)
   sta n_t
+  A8
+  lda #^SlotFrames
+  bra @sbk
+@spr:                        ; ground prop frame m: bank $90 + m/64, offset (m & 63) * 512
+.a16
+  pha
+  and #$003F
+  xba
+  asl
+  ora #$8000
+  sta n_t
+  pla
+  lsr
+  lsr
+  lsr
+  lsr
+  lsr
+  lsr
+  clc
+  adc #^PropFrames
+  A8
+@sbk:
+  sta A1B0
+  A16
   tyx
   lda f:SlotTiles,x
   asl
@@ -3548,6 +4006,442 @@ SS_Line:
   adc #262
 : rts
 
+
+; ================================================================ v1.2 boss: sprite-stacked part groups
+; The robot is drawn as 4 part frames from tools/boss_vox.py (OAM lists in boss_parts.inc), front to back:
+; head + crest (5 yaws, turns to track you), left arm, right arm (down / cannon / spread), body (clean /
+; battle-damaged below 1/3 health). Occlusion between the parts is baked into the frames.
+.include "../assets/boss_parts.inc"
+BP_HEAD0 = 4
+BP_ARM   = 7
+X_BossDraw:
+  lda obj_pri
+  xba
+  and #$FF00
+  sta bd_t                   ; priority bits into the attr byte
+  ; ---- head yaw: toward you (screen centre), one step every 8 frames; straight ahead while the beam fires
+  lda b_sx
+  sec
+  sbc #128
+  ldx #BP_HEAD0
+  cmp #.loword(-56)
+  bpl :+
+  ldx #BP_HEAD0+2            ; far left of the screen: look right (at you)
+  bra @ht
+: cmp #.loword(-20)
+  bpl :+
+  ldx #BP_HEAD0+1
+  bra @ht
+: cmp #57
+  bmi :+
+  ldx #BP_HEAD0-2
+  bra @ht
+: cmp #21
+  bmi @ht
+  ldx #BP_HEAD0-1
+@ht:
+  lda bm_on
+  beq :+
+  ldx #BP_HEAD0
+: stx bp_k
+  lda b_hy
+  bne :+
+  lda #BP_HEAD0
+  sta b_hy
+: lda frame
+  and #7
+  bne @hd
+  lda b_hy
+  cmp bp_k
+  beq @hd
+  bcc :+
+  dec b_hy
+  bra @hd
+: inc b_hy
+@hd:
+  ; ---- list of (part id, dx, dy): head, left arm, right arm, body
+  lda b_hy
+  sta bp_l
+  lda #0                     ; arm poses: spread while the beam / shard attack runs, cannon when raised
+  ldx b_atk
+  cpx #ATK_BEAM
+  beq @spr
+  cpx #ATK_SHARD
+  bne :+
+@spr:
+  lda #BP_ARM+4
+  sta bp_l+2
+  inc a
+  sta bp_l+3
+  bra @bd
+: lda b_arm
+  lsr
+  lda #BP_ARM                ; left: down / cannon
+  bcc :+
+  lda #BP_ARM+2
+: sta bp_l+2
+  lda b_arm
+  and #2
+  beq :+
+  lda #BP_ARM+3
+  bra :++
+: lda #BP_ARM+1
+: sta bp_l+3
+@bd:
+  lda #0                     ; body: clean / damaged (scorched palette time)
+  ldx b_dark
+  beq :+
+  inc a
+: sta bp_l+4                 ; (byte list: head, armL, armR, body in bp_l+0, +2, +3, +4; dy for arms below)
+  A8
+  lda bp_l
+  sta bp_l+1
+  A16
+  ; ---- draw: part ids in bytes bp_l+1..4
+  ldy oam_idx
+  lda #1
+  sta bp_n
+@part:
+  ldx bp_n
+  lda bp_l,x
+  and #$00FF
+  sta bp_k                   ; part id
+  ; per-part offset: arms breathe 1 px, the firing arm kicks up 2 px
+  stz t2
+  cpx #2
+  bcc @noff
+  cpx #4
+  bcs @noff
+  lda b_t
+  and #$0020
+  beq :+
+  inc t2
+: lda b_mf
+  beq @noff
+  txa                        ; X = 2 left arm, 3 right arm; b_side 0 = left
+  dec a
+  dec a
+  cmp b_side
+  bne @noff
+  dec t2
+  dec t2
+  dec t2
+@noff:
+  lda b_sx
+  sta bp_sx
+  lda b_sy
+  clc
+  adc t2
+  sta bp_sy
+  lda bp_k                   ; index entry: 12 bytes
+  asl
+  sta t0
+  asl
+  clc
+  adc t0
+  asl
+  tax
+  lda view
+  cmp #VIEW_COCK
+  bne :+
+  txa
+  clc
+  adc #BPIdx_cock-BPIdx_chase
+  tax
+: lda f:BPIdx_chase+2,x
+  sta t3                     ; entries
+  lda bp_sx                  ; fast path: the whole part on screen and room in OAM
+  sec
+  sbc f:BPIdx_chase+4,x
+  bmi @slow
+  lda f:BPIdx_chase+6,x
+  sec
+  sbc bp_sx
+  bmi @slow
+  lda bp_sy
+  sec
+  sbc f:BPIdx_chase+8,x
+  bmi @slow
+  lda f:BPIdx_chase+10,x
+  sec
+  sbc bp_sy
+  bmi @slow
+  lda t3
+  asl
+  asl
+  sta t0
+  tya
+  clc
+  adc t0
+  cmp #513
+  bcs @slow
+  lda f:BPIdx_chase,x
+  tax
+  lda bp_sy
+  xba
+  and #$FF00
+  clc
+  adc bp_sx
+  sta t4                     ; (sy<<8)+sx
+@fl:
+  lda f:BPData,x
+  clc
+  adc t4
+  sta oam_lo,y
+  lda f:BPData+6,x
+  ora bd_t
+  sta oam_lo+2,y
+  iny
+  iny
+  iny
+  iny
+  txa
+  clc
+  adc #8
+  tax
+  dec t3
+  bne @fl
+  jmp @pn
+@slow:
+  lda f:BPIdx_chase,x
+  tax
+@sl:
+  cpy #512
+  bcs @pn
+  lda f:BPData+4,x
+  clc
+  adc bp_sy
+  sta sy
+  clc
+  adc #16
+  cmp #240
+  bcs @sn                    ; y < -16 or y >= 224
+  lda f:BPData+2,x
+  clc
+  adc bp_sx
+  sta sx
+  clc
+  adc #16
+  cmp #272
+  bcs @sn
+  A8
+  lda sx
+  sta oam_lo,y
+  lda sy
+  sta oam_lo+1,y
+  A16
+  lda f:BPData+6,x
+  ora bd_t
+  A8
+  xba
+  sta oam_lo+3,y
+  xba
+  sta oam_lo+2,y
+  A16
+  lda sx
+  bpl :+
+  phx
+  phy
+  tya
+  and #$000C
+  ora #1                     ; HiTab column 1 = the 9th x bit
+  tax
+  tya
+  lsr
+  lsr
+  lsr
+  lsr
+  tay
+  A8
+  lda .loword(HiTab),x
+  ora oam_hi,y
+  sta oam_hi,y
+  A16
+  ply
+  plx
+: iny
+  iny
+  iny
+  iny
+@sn:
+  txa
+  clc
+  adc #8
+  tax
+  dec t3
+  bne @sl
+@pn:
+  inc bp_n
+  lda bp_n
+  cmp #5
+  beq :+
+  jmp @part
+: sty oam_idx
+  rtl
+
+
+; ================================================================ v1.2 tumbling objects (NMI)
+; Debris chunks, missiles, capsules and crest shards: 8 sprite-stacked frames each in ROM (tumble.bin). Two
+; of the sheet's frames are refreshed per vblank, round robin, after every other VRAM job (line budget).
+.include "../assets/tumble.inc"
+TB_LINES = 31
+SetBit: .word 1, 2, 4, 8, 16, 32, 64, 128
+X_Tumble:
+.ifdef NOTUMBLE
+  rtl
+.endif
+  lda tb_cur                 ; nothing tumbling on screen
+  bne :+
+  rtl
+: lda b_gfx                  ; sheet rows streaming: tiles in flux
+  lsr
+  bcc :+
+  lda #$FFFF
+  sta tb_tab
+  rtl
+: ldx #TbOver-TbChase
+  lda view
+  cmp #VIEW_OVER
+  beq @t
+  ldy b_gfx                  ; (0 field sheet, 2 boss sheet)
+  cmp #VIEW_COCK
+  beq @ck
+  ldx #0
+  cpy #2
+  bne @t
+  ldx #TbChaseB-TbChase
+  bra @t
+@ck:
+  ldx #TbCock-TbChase
+  cpy #2
+  bne @t
+  ldx #TbCockB-TbChase
+@t:
+  cpx tb_tab                 ; another list (view / sheet changed): nothing known to be in VRAM
+  beq :++
+  stx tb_tab
+  lda #$FFFF
+  sta tb_ph
+  ldy #14
+: sta tb_hv,y
+  dey
+  dey
+  bpl :-
+: stx n_k
+  lda frame
+  lsr
+  lsr
+  lsr
+  sta n_i                    ; animation phase (7.5 frames / s)
+  cmp tb_ph                  ; everything drawn is up to date for this phase: done
+  bne :+
+  lda tb_cur
+  cmp tb_pc
+  bne :+
+  rtl
+: lda f:TbChase,x            ; entries
+  sta tb_n
+  jsr SS_Line
+  cmp #TB_LINES
+  bcc :+
+  rtl
+:
+  ldy tb_n                   ; one lap at most, one upload per vblank
+@sk:
+  lda tb_i
+  cmp tb_n
+  bcc :+
+  lda #0
+  sta tb_i
+: asl
+  asl
+  clc
+  adc n_k
+  tax                        ; X = entry offset - 2 (entries start at +2)
+  lda f:TbChase+4,x          ; frame set
+  sta n_t
+  asl
+  phx
+  tax
+  lda f:SetBit,x
+  plx
+  and tb_cur
+  beq @nx
+  phx
+  lda tb_i
+  asl
+  tax
+  lda n_t                    ; wanted frame: phase + set * 3
+  asl
+  adc n_t
+  adc n_i
+  and #7
+  cmp tb_hv,x
+  bne @go
+  plx
+@nx:
+  inc tb_i
+  dey
+  bne @sk
+  lda n_i                    ; a whole lap without uploads
+  sta tb_ph
+  lda tb_cur
+  sta tb_pc
+  rtl
+@go:
+  sta tb_hv,x
+  plx
+  xba
+  lsr                        ; frame * 128
+  sta n_k
+  lda n_t
+  xba
+  asl
+  asl                        ; set * 1024
+  clc
+  adc n_k
+  clc
+  adc #.loword(TumbleFrames)
+  sta A1T0L
+  A8
+  lda #$80
+  sta VMAIN
+  lda #$01
+  sta DMAP0
+  lda #$18
+  sta BBAD0
+  lda #^TumbleFrames
+  sta A1B0
+  A16
+  lda f:TbChase+2,x          ; sheet tile
+  asl
+  asl
+  asl
+  asl
+  clc
+  adc #$6000
+  sta VMADDL
+  sta n_t
+  lda #64
+  sta DAS0L
+  A8
+  lda #1
+  sta MDMAEN
+  A16
+  lda n_t
+  clc
+  adc #16*16
+  sta VMADDL
+  lda #64                    ; (A1T0 has advanced by 64)
+  sta DAS0L
+  A8
+  lda #1
+  sta MDMAEN
+  A16
+  inc tb_i
+@r:
+  rtl
+
 .segment "BANK11"
 M7MapB:   .incbin "../assets/m7mapB.bin"
 M7TilesB: .incbin "../assets/m7tilesB.bin"
@@ -3556,6 +4450,23 @@ M7TilesB: .incbin "../assets/m7tilesB.bin"
 
 .segment "BANK13"
 JetFrames:  .incbin "../assets/jetframes.bin"     ; 15 x 64x64 (8 rows of 8 tiles)
+.segment "BANK15"
+PropMid: .incbin "../assets/propmid.bin"         ; per stage: 4 mid + 4 far 16x16 prop frames
+TumbleFrames: .incbin "../assets/tumble.bin"      ; 8 sets x 8 frames x 16x16 (v1.2)
 .segment "BANK14"
-SlotFrames: .incbin "../assets/slotframes.bin"   ; 32x32 (4 rows of 4 tiles): 9 enemy yaws, 3 props x 16 yaws
+SlotFrames: .incbin "../assets/slotframes.bin"   ; 32x32 (4 rows of 4 tiles): 9 enemy yaws
+; v1.2: near ground prop frames (13 models x 16 yaws x 512 B), 64 frames per bank from $90
+.segment "PROPB0"
+PropFrames: .incbin "../assets/propframes.bin", 0, 32768
+.segment "PROPB1"
+  .incbin "../assets/propframes.bin", 32768, 32768
+.segment "PROPB2"
+  .incbin "../assets/propframes.bin", 65536, 32768
+.segment "PROPB3"
+  .incbin "../assets/propframes.bin", 98304
+; v1.2: prop offsets rotated for every heading (headings 0-127 in $94, 128-255 in $95)
+.segment "PROPB4"
+PropRot: .incbin "../assets/proprot.bin", 0, 128*NPROPS*2
+.segment "PROPB5"
+  .incbin "../assets/proprot.bin", 128*NPROPS*2
 .segment "CODE"
