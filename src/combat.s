@@ -250,6 +250,9 @@ CombatStep:
   jsr MoveDebris
   CHK 15
   jsr Hits
+  TBEG 0
+  jsl X14_Step               ; v1.4: roll, charge blast, ground targets, smoke, rings
+  TEND 0
   jsr BossStep
   jsr BossColors
   CHK 16
@@ -1845,6 +1848,9 @@ ProjectObjects:
 : jsr AddObj
 @nw:
   CHK 46
+  TBEG 1
+  jsl X14_Project            ; v1.4: charge blast, smoke columns, shockwave rings
+  TEND 1
   jsl X_Project
   CHK 47              ; v1.1: capsules, impact sparks, floating numbers
   jmp BossObjs

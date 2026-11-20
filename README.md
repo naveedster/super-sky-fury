@@ -89,12 +89,16 @@ SNES emulator.
 | D-pad left/right | turn (the jet banks) |
 | D-pad up/down | climb / dive |
 | Y (hold) | guns |
+| X (hold, release) | charge shot: hold until CHARGE READY, let go to fire a big piercing blast |
 | A | heat-seeking missile (locks onto the nearest enemy ahead) |
 | B | afterburner |
 | L / R | hard bank (tighter turn) |
-| SELECT or X | change view: chase -> overhead -> cockpit (chase <-> cockpit during the boss) |
+| L L or R R (double-tap) | barrel roll that way: you can't be hit while rolling |
+| SELECT | change view: chase -> overhead -> cockpit (chase <-> cockpit during the boss) |
 
-Scoring: 100 points for a gun kill and 200 for a missile kill. You get an extra life every
+Scoring: 100 points for a gun kill and 200 for a missile kill. A near miss (graze) is worth 100
+points (200 if you roll through the bullet) and fills part of the charge meter. After each stage you get
+a rank from S to C, based on kills, grazes, and hits taken. You get an extra life every
 10,000 points (up to 9).
 
 ## Building from source
@@ -138,6 +142,30 @@ For the full test methodology and the hardware-safety rules the code follows, se
 [docs/TECHNICAL.md](docs/TECHNICAL.md).
 
 ## Changelog
+
+### v1.4 (2026-11-20)
+
+![v1.3 vs v1.4](docs/screenshots/before_after_v1_4.png)
+
+* **Barrel roll**: double-tap L or R. The jet rolls and slides sideways, and you can't be hit while it rolls.
+  The whoosh circles your head in stereo, passing behind you.
+* **Charge shot**: hold X until CHARGE READY beeps, then let go. A white-hot blast flies straight ahead and
+  passes through enemies. It also hurts the boss and flattens ground targets.
+* **Graze bonus**: a bullet that just misses gives points, a spark on that wing, and a whoosh in that ear.
+  It also fills part of the charge meter. Rolling through a bullet counts double.
+* **Weapon levels**: P capsules now stack: LV2 spread, then LV3 MAX POWER (all three lanes on every
+  round, a faster rate of fire, and wider hits).
+* **Stage rank**: STAGE CLEAR shows S/A/B/C with kills, grazes, and hits taken.
+* **Ground targets fixed**: hits are now checked on every physics frame, with sweeping, at any altitude,
+  so bullets no longer pass through bunkers, tanks, and turrets. Destroyed targets flash and leave a
+  rising smoke column.
+* **Graphics**: shimmering Mode 7 water (palette cycling for swell, crests, foam, and shallows), a sunset
+  sky over the desert, a city glow on the night horizon, shockwave rings on big explosions, muzzle
+  flashes, a charge glow on the nose, and boss shoulder pads that sweep up and frame the head.
+* **Controls**: X is now the charge shot, and the view change is on SELECT only.
+* **Performance**: the effects cost about 1 to 2 scanlines per frame. To pay for them, the contrail loop
+  is leaner and the new effects skip work when idle. Ground-target checks run every other frame, and
+  smoke and rings drop to a light version on busy frames. Boss fight: same as v1.3. See TECHNICAL.md.
 
 ### v1.3 (2026-11-20)
 

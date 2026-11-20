@@ -14,6 +14,33 @@ NHIST      = 8           ; overhead contrail history length (a point every 5 fra
 MSZ        = NE_CH*4     ; bytes per matrix data array (4 bytes per entry)
 VSZ        = NE_CH*2     ; bytes per VOFS data array
 TBL_MAXLATE = TBLML          ; ...but never more than this many frames running
+
+; v1.4 debug: TIMEIT builds sum the scanlines spent between TBEG n / TEND n at $7F6000+n*8 (sum32, max, count)
+.macro TBEG n
+.ifdef TIMEIT
+  pha
+  phx
+  jsr LineRel
+  sta f:$7F6100+n*2
+  plx
+  pla
+.endif
+.endmacro
+.macro TEND n
+.ifdef TIMEIT
+  php
+  pha
+  phx
+  ldx #n*8
+  jsr TimeEnd
+  plx
+  pla
+  plp
+.endif
+.endmacro
+.ifndef CL_NEAR
+CL_NEAR = 88
+.endif
 .ifndef PROFHOT
 PROFHOT = 251
 .endif
@@ -213,12 +240,14 @@ ct_c3:    .res 2
 ct_yd:    .res 2
 ct_xd:    .res 2
 tmpw:     .res 2
+.ifdef PROFX                ; (v1.4: profiling buffers only in PROFX builds, frees 586 bytes of low RAM)
 profmax:  .res 130
 profcur:  .res 130
 profprev: .res 2
 profsum:  .res 192
 profhot:  .res 130
 profhot_n: .res 2
+.endif
 rowbuf:   .res 64
 digbuf:   .res 16
 hist_lx:  .res NHIST*2
@@ -485,6 +514,58 @@ LineRel:
   stx lr_n                  ; the frame count that goes with this reading
   plx
   rts
+.ifdef TIMEIT
+TimeEnd:
+  phx
+  jsr LineRel
+  plx
+  phx
+  pha
+  txa
+  lsr
+  lsr
+  tax
+  pla
+  sec
+  sbc f:$7F6100,x
+  plx
+  sta f:$7F6300
+  phx
+  txa
+  xba
+  lsr
+  lsr
+  sta f:$7F6302
+  lda f:$7F6300
+  and #$FF
+  asl
+  ora f:$7F6302
+  tax
+  lda f:$7F6400,x
+  inc a
+  sta f:$7F6400,x
+  plx
+  lda f:$7F6300
+  cmp #$8000
+  bcc :+
+  clc
+  adc #262
+: pha
+  clc
+  adc f:$7F6000,x
+  sta f:$7F6000,x
+  lda #0
+  adc f:$7F6002,x
+  sta f:$7F6002,x
+  pla
+  cmp f:$7F6004,x
+  bcc :+
+  sta f:$7F6004,x
+: lda f:$7F6006,x
+  inc a
+  sta f:$7F6006,x
+  rts
+.endif
 ; debug: frame load = NMI time + main-loop work time, in scanlines (262 = one full frame)
 ; work done so far this frame in scanlines: NMI time + main loop time, idle waits excluded
 LoadNow:
@@ -1273,6 +1354,7 @@ NmiFast:
   stz hud_flag
 @nohud:
   jsl X_Nmi                  ; v1.1: floating-number glyphs, scorched boss palette
+  jsl X14_Nmi                ; v1.4: water shimmer
   jsr BossNmi               ; boss palette / colour animation / sheet streaming
   jsl X_Stream               ; v1.1: sprite-stack frames (jet / near enemies / ground props), line-budgeted
   jsl X_Tumble               ; v1.2: tumbling debris / missiles / capsules / shards (2 frames per vblank)
@@ -1389,7 +1471,7 @@ Buttons:
   lda gameover
   bne @noview
   lda joy_new
-  and #(KEY_SELECT|KEY_X)
+  and #KEY_SELECT            ; (v1.4: X is the charge shot)
   beq @noview
   ; debug shortcut: paused + hold L+R + SELECT = straight to the boss
   lda paused
@@ -2469,7 +2551,7 @@ ProjectClouds:
   ; clouds farther than 120 px are re-projected every other frame; in between they
   ; continue at their measured screen velocity (covers yaw and forward parallax)
   lda cl_z,y
-  cmp #120
+  cmp #CL_NEAR               ; (v1.4: 120 -> 88: pays for the new effects)
   bcc @do0
   lda cl_vok,y
   beq @do0
@@ -2909,6 +2991,11 @@ BuildChase:
   sta sattr
   jsr PutSpr
 @nofl:
+  lda mf_t                   ; v1.4: muzzle flash, charge glow
+  ora ch_t
+  beq :+
+  jsl X14_JetFx
+:
   CHK 6
   jsr ChaseTrails
 @nojet:
@@ -2957,9 +3044,29 @@ ChaseTrails:
   lda #$12
   sta sattr
   stz sbig
+  lda t0                     ; (v1.4: leaner loop, same dots: pays for the new effects)
+  clc
+  adc #96
+  sta t0
+  lda t1
+  clc
+  adc #102
+  sta t1
+  lda t2
+  clc
+  adc #96
+  sta t2
+  lda t3
+  clc
+  adc #102
+  sta t3
   stz tmpw                  ; acc = turnrate * k^2 (built by odd steps)
+  stz t6                    ; 5k
+  stz t7                    ; 2k
   lda turnrate
   sta m_div                 ; step = turnrate * (2k-1)
+  asl
+  sta ct_tr2
   ldy #1
 @k:
   sty t4
@@ -2969,8 +3076,7 @@ ChaseTrails:
   sta tmpw
   lda m_div
   clc
-  adc turnrate
-  adc turnrate
+  adc ct_tr2
   sta m_div
   ; lag = -(turnrate * k^2) >> 10
   lda tmpw
@@ -2986,33 +3092,19 @@ ChaseTrails:
   eor #$FFFF
   inc a
   sta t5
-  ; tile by distance
-  lda t4
-  cmp #3
-  bcs :+
-  lda #T_CHASE_DOT0
-  bra @tl
-: cmp #5
-  bcs :+
-  lda #T_CHASE_DOT1
-  bra @tl
-: lda #T_CHASE_DOT2
-@tl:
-  sta stile
-  ; vertical: tip + k*5
-  lda t4
-  asl
-  asl
+  lda t6
   clc
-  adc t4
+  adc #5
   sta t6
-  ; left dot
-  lda t4
+  inc t7
+  inc t7
+  tya                       ; tile by distance
   asl
-  sta t7
+  tax
+  lda f:DotTile,x
+  sta stile
+  ; left dot
   lda t0
-  clc
-  adc #96
   sec
   sbc t7
   clc
@@ -3020,15 +3112,32 @@ ChaseTrails:
   sta sx
   lda t1
   clc
-  adc #102
-  clc
   adc t6
   sta sy
-  jsr PutDot
+  lda sx                     ; (inline PutDot)
+  cmp #256
+  bcc :+
+  jsr PutSpr
+  bra :++
+: ldx oam_idx
+  cpx #512
+  bcs :+
+  A8
+  sta oam_lo,x
+  lda sy
+  sta oam_lo+1,x
+  lda stile
+  sta oam_lo+2,x
+  lda #$13                   ; sattr $12 | tile bit 8
+  sta oam_lo+3,x
+  A16
+  txa
+  clc
+  adc #4
+  sta oam_idx
+:
   ; right dot
   lda t2
-  clc
-  adc #96
   clc
   adc t7
   clc
@@ -3036,11 +3145,30 @@ ChaseTrails:
   sta sx
   lda t3
   clc
-  adc #102
-  clc
   adc t6
   sta sy
-  jsr PutDot
+  lda sx                     ; (inline PutDot)
+  cmp #256
+  bcc :+
+  jsr PutSpr
+  bra :++
+: ldx oam_idx
+  cpx #512
+  bcs :+
+  A8
+  sta oam_lo,x
+  lda sy
+  sta oam_lo+1,x
+  lda stile
+  sta oam_lo+2,x
+  lda #$13                   ; sattr $12 | tile bit 8
+  sta oam_lo+3,x
+  A16
+  txa
+  clc
+  adc #4
+  sta oam_idx
+:
   ldy t4
   iny
   cpy #8
@@ -3048,6 +3176,7 @@ ChaseTrails:
   jmp @k
 :
   rts
+DotTile: .word 0, T_CHASE_DOT0, T_CHASE_DOT0, T_CHASE_DOT1, T_CHASE_DOT1, T_CHASE_DOT2, T_CHASE_DOT2, T_CHASE_DOT2
 
 ; small on-screen sprite fast path (contrail dots): no size bit, x in 0..255
 PutDot:
@@ -3892,6 +4021,7 @@ TrailCommon:
 .include "boss.s"
 .include "title.s"
 .include "v11.s"
+.include "v14.s"
 .include "../music/build/apu_upload.inc"
 
 ; =====================================================================
@@ -3958,7 +4088,7 @@ MapCock:  .incbin "../assets/map_cock.bin"
   .byte $00                       ; no SRAM
   .byte $01                       ; North America
   .byte $00                       ; developer
-  .byte $03                       ; version (v1.3)
+  .byte $04                       ; version (v1.4)
   .word $FFFF                     ; checksum complement (fixed by build)
   .word $0000                     ; checksum
 

@@ -244,8 +244,9 @@ def body_prims():
               (x * 22, -108, 25), (x * 22 - 12, -113, -8), (x * 22 + 12, -113, -8), (x * 22, -106, 15)]
         P.append(hull(fp, W_, G, paint=("foot",)))
         # shoulder pads: broad, angular, jutting up and out round the head; blue under-trim
-        pd = [(x * 27, 30, 9), (x * 27, 30, -10), (x * 68, 58, 0), (x * 63, 50, 8), (x * 61, 13, 9), (x * 61, 13, -10),
-              (x * 31, 9, 11), (x * 46, 28, 15.5), (x * 50, 12, 13), (x * 65, 52, -8), (x * 36, 36, 6)]
+        # v1.4: swept higher and raked in at the tips, so the pads frame the head
+        pd = [(x * 27, 30, 9), (x * 27, 30, -10), (x * 62, 76, 0), (x * 58, 68, 7), (x * 61, 13, 9), (x * 61, 13, -10),
+              (x * 31, 9, 11), (x * 46, 30, 15.5), (x * 52, 12, 13), (x * 60, 70, -7), (x * 36, 40, 6), (x * 66, 40, 2)]
         P.append(hull(pd, W_, G, paint=("pad", x)))
         # missile pod on the back of each pad (the volley launchers)
         mp = [(x * 37, 36, -3), (x * 49, 41, -3), (x * 37, 41, -3), (x * 49, 46, -3), (x * 37, 36, -12), (x * 49, 41, -12),

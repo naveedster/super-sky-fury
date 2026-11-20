@@ -252,11 +252,13 @@ T_ScoreAdd:  clc                 ; v1.2: A = points (x100) -> score, HUD, extra 
 
 ; ---------------------------------------------------------------- game start / restart
 X_GameInit:                 ; (InitCombat: LoadStatic has just loaded map A + the stage-0 palette)
+  jsl X14_Reset              ; v1.4
   stz cur_map
   stz cur_pal
   jsr ResetRun
   rtl
 X_Restart:                  ; (RestartGame: back to stage 1, reload the world if it changed)
+  jsl X14_Reset              ; v1.4
   jsr ResetRun
   lda cur_map
   ora cur_pal
@@ -348,6 +350,7 @@ MsgSet:
 ; ---------------------------------------------------------------- Spawn: per-type setup
 ; X = slot*2, t0 = type
 X_SpawnInit:
+  inc st_spawn               ; v1.4: stage rank
   stz en_hf,x
   lda #1
   sta en_hp,x
@@ -471,6 +474,12 @@ X_Step:
   beq :+
   stz p_spread
   stz p_rapid
+: stz p_wide                 ; v1.4: LV3 = wider rounds
+  lda p_spread
+  cmp #2
+  bcc :+
+  lda #4
+  sta p_wide
 : lda b_jt                 ; boss hit jolt: +-b_ja px, alternating every 2 frames
   beq @nj
   dec b_jt
@@ -797,7 +806,11 @@ HitSpark:
   ; fall through
 ; A = kind (0 spark, 1 big flash, 2 weak-point burst), t0/t1 = screen x/y
 FxAt:
-  sta x_k
+  cmp #1                     ; v1.4: big flashes send out a shockwave ring
+  bne :+
+  jsr X14_Ring
+  lda #1
+: sta x_k
   lda fx_n
   inc a
   inc a
@@ -829,6 +842,7 @@ Shake:
 ; ---------------------------------------------------------------- kills: points, combo, big-kill juice
 ; KillEnemy calls this first: X = slot, o_f = 1 (gun) / 2 (missile) -> A = points (x100)
 X_KillPts:
+  inc st_kills               ; v1.4: stage rank
   stx x_i
   lda combo_t
   beq :+
@@ -988,8 +1002,9 @@ DropPU:
 : sta pu_cyc
   cmp #0
   bne DropKind
-  ldy p_spread
-  beq DropKind
+  ldy p_spread               ; v1.4: P stacks to LV3
+  cpy #2
+  bcc DropKind
   lda #1
   sta pu_cyc
 ; A = kind
@@ -1092,9 +1107,20 @@ Collect:
   cmp #1
   beq @m
   bcs @s
-  lda #1
+  lda p_spread               ; v1.4: SPREAD (LV2), then MAX POWER (LV3)
+  .ifdef NOLV3
+  cmp #1
+  .else
+  cmp #2
+  .endif
+  bcs :+
+  inc a
   sta p_spread
-  lda #.loword(TX_PUP_P)
+: lda #.loword(TX_PUP_P2)
+  ldx p_spread
+  cpx #2
+  bcc @t
+  lda #.loword(TX_PUP_P3)
   bra @t
 @m:
   lda #60*20
@@ -1129,9 +1155,20 @@ Collect:
 ; extra lanes at +-8 degrees (bu_ln bits 2 / 4): one bullet to move, hit-test and project, 3 to see and hit with.
 X_Spread:
   pha
+  lda #3                     ; v1.4: muzzle flash on that wing
+  sta mf_t
+  lda gun_side
+  sta mf_s
   lda #1
   ldy p_spread
   beq :+
+  cpy #2
+  bcc @lv2
+  lda #5                     ; LV3: all three lanes every round, faster
+  sta fire_cd
+  lda #7
+  bra :+
+@lv2:
   lda gun_side              ; alternate rounds carry the left / right lane (half the sprites of 3 streams)
   asl
   inc a
@@ -1158,6 +1195,10 @@ LaneOff:
 
 ; Hits: bullet Y is level with enemy X (t1 = enemy x px): test its live lanes; carry set = hit (done)
 X_LaneHit:
+  lda en_hw,x                ; v1.4: LV3 rounds are wider
+  clc
+  adc p_wide
+  sta x14_hw
   lda bu_x,y
   sta x_bx
   sec
@@ -1168,7 +1209,7 @@ X_LaneHit:
   beq @l
   lda x_dx
   jsr XAbs
-  cmp en_hw,x
+  cmp x14_hw
   bcs @l
   lda x_bx
   sta v_lx
@@ -1189,7 +1230,7 @@ X_LaneHit:
   sec
   sbc x_of
   jsr XAbs
-  cmp en_hw,x
+  cmp x14_hw
   bcs @r
   lda x_bx
   sec
@@ -1205,7 +1246,7 @@ X_LaneHit:
   clc
   adc x_of
   jsr XAbs
-  cmp en_hw,x
+  cmp x14_hw
   bcs @no
   lda x_bx
   clc
@@ -2479,6 +2520,10 @@ X_WaveStage:
   sta st_next
   cmp stage
   beq @skip                 ; (already there: e.g. the loop back to stage 1 after the boss)
+  phx
+  jsl X14_RankGate           ; v1.4: STAGE CLEAR + rank first
+  plx
+  bcc @no
   lda #1
   sta st_tr
   stz st_t
@@ -2546,6 +2591,7 @@ StageStep:
 
 ; black screen: new palette / map / sky / haze (LoadView does the uploads), banner, fade in
 StageApply:
+  jsl X14_StageStats         ; v1.4
   jsr PrRevive
   lda st_next
   sta stage
@@ -2898,7 +2944,10 @@ SS_Reset:                    ; sheet (re)loaded from ROM: slots hold their place
 
 ; chase jet: frame from bank (|turnrate|, 5 steps) and climb / dive; h-flip when banking left
 X_JetFrame:
-  lda turnrate
+  lda roll_t                 ; v1.4: barrel roll
+  beq :+
+  jml X14_JetFrame
+: lda turnrate
   bpl :+
   eor #$FFFF
   inc a
@@ -3155,9 +3204,14 @@ PropHit:
   clc
   rts
 @hit:
+; v1.4: also entered from PropHits (src/v14.s): pr_i, pr_x, x_dx, sx, pr_gy set; Y = round ($FFFF: charge blast)
+PropStrike:
+  sty x_j
+  cpy #$FFFF
+  beq :+
   lda #0
   sta bu_d,y                 ; the round is spent
-  lda pr_i
+: lda pr_i
   cmp pr_hid
   beq :+
   sta pr_hid
@@ -3188,6 +3242,9 @@ PropHit:
   clc
   rts
 @kill:
+  jsr X14_Column             ; v1.4: a smoke column over the wreck
+  lda #6
+  jsr FlashMin
   lda pr_i                   ; down for this stage
   jsr PrBit
   ora pr_dead,x
@@ -3547,6 +3604,8 @@ X_Props:
   sta pn_gy,y
   lda pr_z
   sta pn_z,y
+  lda pr_x                   ; v1.4: lateral, for the every-frame hit test
+  sta pn_x,y
   lda #$FFFF
   sta pn_u,y
   lda f:PropOff+4,x
@@ -3608,11 +3667,7 @@ X_Props:
   lda pr_hs
   cmp #5
   bcc :+
-.ifdef NOPHIT
-  clc
-.else
-  jsr PropHit
-.endif
+  clc                        ; v1.4: hits are tested every frame (PropHits, src/v14.s)
   bcc :+
   lda #$FFFF                 ; destroyed: not drawn
   sta pn_u,y
@@ -3696,6 +3751,7 @@ X_Props:
   iny
   bra @vl
 @vd:
+  stz pc_nmil                ; v1.4: PcMil counts them again
   ldx #0                     ; commit
 : cpx #PR_MAX*2
   beq :+
@@ -3711,6 +3767,9 @@ X_Props:
   sta pc_fr,x
   lda pn_z,x
   sta pc_z,x
+  lda pn_x,x
+  sta pc_x,x
+  jsr PcMil                  ; v1.4: a standing military target? (for PropHits)
   lda pn_vx_t,x
   sta pc_vx,x
   lda pn_vy_t,x
@@ -3720,6 +3779,7 @@ X_Props:
   bra :-
 : lda pr_n
   sta pc_n
+  stz pr_acc                 ; v1.4: depth correction restarts
   bra @emit
 @adv:                        ; glide: advance by the measured screen velocity
   ldx #0

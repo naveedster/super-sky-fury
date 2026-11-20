@@ -9,6 +9,74 @@ that name. The public overview is in the [README](../README.md).
 > They are excluded by `.gitignore` and are not in the repository. The release ROM is
 > `dist/super_sky_fury.sfc`. Current music renders are `music/{title,stage,boss,boss_victory}.{mp3,spc}`.
 
+## v1.4: barrel roll, charge shot, graze, ranks, ground-target fix, effects
+
+All new code is in `src/v14.s` (bank $8C XCODE, plus a few bank-0 trampolines). It is hooked from
+CombatStep (`X14_Step`), ProjectObjects (`X14_Project`), the NMI (`X14_Nmi`), BuildChase (`X14_JetFx`),
+MoveEB (graze), PlayerHit (no damage while rolling), and X_WaveStage (the rank gate).
+
+* **Barrel roll.** A second press of L or R within 14 frames starts a 26-frame roll (12-frame cooldown).
+  `X14_JetFrame` plays a 26-step frame/flip table. `SlideAll` moves every jet-relative object by
+  44/16 px per frame, and the world position moves by MulSS with cos and sin. PlayerHit ignores hits
+  while `roll_t` is set. The whoosh reuses the live-surround SB_FLYBY with a new follow kind
+  (`K_ROLL`): `RollSX`/`RollSZ` carry it front, to the roll side, behind, and to the other side. ARAM
+  is full, so no new samples were added.
+* **Charge shot.** Hold X for 40 frames; each graze banks 12. When it is full, SA_BEEP plays.
+  Releasing X fires `cb_*`, which lives 34 frames. Each enemy it touches gets `X_MissileHit` and 6 extra
+  damage, and it keeps flying. The boss takes 6 plus a missile hit, and that ends the blast. It also
+  flattens ground targets. It is drawn as X32A + X16A, flickering (chase and cockpit).
+* **Graze.** A tracer that misses within 30 px sideways and 24 px in height gives +100 points and a
+  spark on that wing, plays debris L/R in that ear, and banks charge. A tracer passed through during
+  a roll counts double.
+* **Weapon levels.** P stacks: LV2 is the v1.3 spread. LV3 fires all three lanes on every round with
+  `fire_cd` 5 and +4 px hit half-width (`p_wide`).
+* **Rank.** `X14_RankGate` holds the stage switch for 170 frames with STAGE CLEAR, the rank, and the
+  stats: kills/spawned, grazes, and hits. The percentage is computed with the hardware multiplier and
+  divider: S at 100 or more, A at 82, B at 60, otherwise C.
+* **Ground targets.** v1.3 only tested hits during the full prop projection (every 2nd frame, skipped
+  on busy frames) with a ±22 px depth window, so bullets passed through targets. Now the
+  committed prop list stores x (`pc_x`) and a "standing military" flag (`PcMil`). `PropHits`
+  corrects each prop's depth by the distance flown since the projection (`pr_acc`). Every 2nd physics
+  frame it sweeps each round over two frames of travel. The net widens with altitude (18 + lev/4 px)
+  and with the spread lanes. `PropStrike` is the old hit/kill body, shared with the charge blast.
+  A kill adds a colour-math flash and a smoke column (two puffs climbing and drifting, 4 s).
+* **Effects.** Shockwave ring: FxAt kind 1 adds 6 sparks on an expanding flattened circle (16 frames;
+  not during the boss). Muzzle flash at the firing wing, and a charge glow on the nose. Water
+  shimmer: the NMI rewrites 6 CGRAM colours (swell, crest, fleck, white, foam, shallows) every 8
+  frames from a per-stage table (`assets/shim.bin`, 4 stages x 8 phases). The desert sky is now a
+  sunset (warm band and clouds, warmer haze), and the night sky has a city glow near the horizon.
+  Boss shoulder pads (`tools/boss_rt.py`) sweep up to the crest and rake inward at the tips. The
+  chase sheet still has 20 tiles free.
+* **Bug found on the way.** `v14.s` ended in the XCODE segment, so `ApuUpload` (included after it) landed
+  in bank $8C and was called with a near `jsr`, which meant no music. `v14.s` now ends with
+  `.segment "CODE"`.
+
+**Performance** (RING builds, frame load in scanlines; 262 = a dropped frame). The stage runs use
+`rcm.sh` with K=6, with X mapped to SELECT for v1.4, and with `NORANK` so stage progression lines up
+with v1.3. The boss uses `bossbench.sh` with K=8.
+
+| Run | Build | over 262 | over 250 | p99 | mean | max |
+|---|---|---|---|---|---|---|
+| sa0 (chase) | v1.3 | 124 | 896 | 259 | 187.0 | 294 |
+| sa0 (chase) | v1.4 | 196 | 1122 | 260 | 188.6 | 295 |
+| sa1 (overhead) | v1.3 | 15 | 18 | 214 | 144.1 | 324 |
+| sa1 (overhead) | v1.4 | 15 | 20 | 214 | 145.2 | 337 |
+| sa2 (cockpit) | v1.3 | 1 | 10 | 237 | 163.2 | 272 |
+| sa2 (cockpit) | v1.4 | 2 | 10 | 238 | 164.7 | 275 |
+| boss | v1.3 | 6 | 72 | 234 | 138.9 | 285 |
+| boss | v1.4 | 11 | 92 | 238 | 138.7 | 283 |
+
+The new hooks cost about 1.5 to 2 lines per frame. To pay for them: ChaseTrails was rewritten (with
+the same dots, it is about 2 lines cheaper), the new effects skip work when idle, PropHits runs only
+when a military target is listed and on every other frame, and smoke and rings drop to a light
+version on busy frames (24+ objects). Heavy chase scenes still drop slightly more frames than v1.3
+(0.6% of frames vs 0.4%).
+
+**Verification.** `tools/dev/boss_win_rel.txt` reaches MISSION COMPLETE with the release ROM on snes9x,
+snes9x 1.55 (Delta), and Mesen-S. Full run on the same 3 cores: an AUTOPILOT build played from the
+title by the harness bot (BOT/BOTPU) clears all four stages, and the boss autopilot wins (BS_DONE
+around frame 10,700).
+
 ## v1.3: reference-matched boss
 
 **Model.** `tools/boss_rt.py` replaces the voxel boss with an analytic model (convex hulls,
@@ -274,7 +342,9 @@ chase, overhead and cockpit. All art and code are original. The art is generated
 | A | heat-seeking missile (locks the nearest enemy ahead; 0.75 s reload) |
 | B | afterburner: speed up, orange thruster flame (A is no longer thrust) |
 | L / R | hard bank (tighter turn, full bank angle) |
-| SELECT (or X) | cycle view: chase -> overhead -> cockpit |
+| SELECT | cycle view: chase -> overhead -> cockpit (v1.4: X is now the charge shot) |
+| X (hold, release) | v1.4 charge shot: a piercing blast once CHARGE READY beeps |
+| double-tap L or R | v1.4 barrel roll (26 frames, invulnerable, slides sideways) |
 | START | pause; on the GAME OVER screen: play again |
 | START, then hold L+R and press SELECT | **debug shortcut**: while paused, clears the sky and jumps straight to the boss (WARNING). Unpause with START |
 | SELECT during the boss | cycles chase <-> cockpit only (no overhead, see below) |

@@ -193,10 +193,12 @@ PlayerHit:
   lda p_dead
   ora gameover
   ora p_inv
+  ora roll_t                 ; v1.4: rolling = untouchable
   beq :+
   clc
   rts
-: lda p_shield
+: inc st_hits
+  lda p_shield
   sec
   sbc ph_d
   bpl :+
@@ -617,10 +619,13 @@ MoveEB:
   jsr PlayerHit
   CHK 27
   ldx c_j
-  bcc @n                    ; invulnerable: it flies through
-  jmp @kill
+  bcs :+
+  jsl X14_GrazeRoll          ; invulnerable: it flies through (v1.4: rolling through it = graze x2)
+  bra @n
+: jmp @kill
 @miss:
   ldx c_j
+  jsl X14_Graze              ; v1.4: near miss = graze
   bra @n
 @ahead:
   ; whiz: about to pass close by your head (channel B follows the round)
@@ -1765,6 +1770,13 @@ SfxPos:
   sta t0
   lda #20*16                ; the beam's near end sweeps right past you
   jmp @z
+: cmp #K_ROLL
+  bne :+
+  lda roll_t
+  beq @gone
+  jsl X14_RollPos            ; v1.4: the roll whoosh circles your head
+  sec
+  rts
 : lda sfx_fx,y
   sta t0
   lda sfx_fz,y
