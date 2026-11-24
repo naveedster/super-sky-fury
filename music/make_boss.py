@@ -82,6 +82,9 @@ srcn = dict(info['srcn'])
 for i, n in enumerate(NEW_ORDER):
     srcn[n] = 7 + i
     mm.SRC[n] = 7 + i
+VOICE_SR = 9000
+VOICE_SRCN = 7 + len(NEW_ORDER)                     # 10
+mm.SRC['voice'] = VOICE_SRCN
 blobs = {}
 for n in NEW_ORDER:
     s = NEW[n]
@@ -298,6 +301,11 @@ def boss_sfx():
     for k in range(8):
         s.step(120 * (1 - k / 10), 0x0C00 - k * 0x60, DYN, kon=(k == 0))
     out['bcannon'] = s.end()
+    # v1.6 voice line: one key-on at 9 kHz, centre, then hold the channel until the sample has played out
+    s = Sfx().src('voice')
+    s.step(124, 0x0480, mm.panb(0.0), kon=True)
+    s.hold(int(math.ceil(2.45 / (BOSS_DIV / 8000))))
+    out['voice'] = s.end()
     # A12 beam charge (telegraph): rising, pulsing square whine, ~1 s
     s = Sfx().src('sqld')
     n = 34
@@ -457,7 +465,7 @@ for name in list(mm.SFX_A_BOSS.values()) + list(mm.SFX_B_BOSS.values()):
     addr += len(b)
 sfx_total = addr - R0
 BDIR = (addr + 0xFF) & ~0xFF
-nent = 7 + len(NEW_ORDER)
+nent = 7 + len(NEW_ORDER) + 1          # v1.6: + the voice line (entry 10)
 ram_b[BDIR:BDIR + 28] = ram_f[mm.DIR_ADDR:mm.DIR_ADDR + 28]
 addr = BDIR + 4 * nent
 for i, n in enumerate(NEW_ORDER):
@@ -481,6 +489,21 @@ jblob, jstarts = mm.compile_song(jsong, jloop, jend, S, srcn, jaddr)
 mm.init_stream = real_init
 ram_b[jaddr:jaddr + len(jblob)] = jblob
 BOSS_END = jaddr + len(jblob)
+# v1.6: the Stage 1 boss's voice line ("Naveed! I will destroy you!"): 9 kHz one-shot BRR, sample 10,
+# played on SFX channel B (id 12) at pitch $0480 (9000 / 32000 * $1000); see tools/dad/make_voice.sh
+import wave as _wave
+_w = _wave.open(os.path.join(HERE, 'dad_voice.wav'))
+assert _w.getframerate() == VOICE_SR and _w.getnchannels() == 1
+_vx = np.frombuffer(_w.readframes(_w.getnframes()), np.int16).astype(np.int32)
+_vx = np.concatenate([_vx, np.zeros((-len(_vx)) % 16 + 16, np.int32)])
+_vx = (_vx * 0.92).astype(np.int32)                 # BRR headroom
+vblob = encode(_vx)
+VOICE_ADDR = BOSS_END
+struct.pack_into('<HH', ram_b, BDIR + 4 * VOICE_SRCN, VOICE_ADDR, VOICE_ADDR)
+ram_b[VOICE_ADDR:VOICE_ADDR + len(vblob)] = vblob
+BOSS_END = VOICE_ADDR + len(vblob)
+print(f'  voice sample {VOICE_SRCN} ${VOICE_ADDR:04X} {len(vblob)} bytes ({len(_vx) / VOICE_SR:.2f} s at {VOICE_SR} Hz); '
+      f'{mm.ECHO_ADDR - BOSS_END} bytes left before the echo buffer')
 assert BOSS_END <= mm.ECHO_ADDR
 secs, _ = mm.assemble_driver(starts, info['sfx_addr'], jstarts, timer_div=BOSS_DIV, external=ext)
 (o1, drv), (o2, sfxc) = secs

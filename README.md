@@ -143,6 +143,24 @@ For the full test methodology and the hardware-safety rules the code follows, se
 
 ## Changelog
 
+### v1.6 (2026-11-20): Dad is the Stage 1 boss
+
+![Dad boss](docs/screenshots/dad_boss.png)
+
+* **Stage 1 boss: Naveed's dad.** Stage 1 now ends with a giant hovering bust of my dad (silver hair, white beard,
+  rimless glasses, red Spain jersey), converted from a photo to a 128x144, 15-colour sprite (`tools/dad/dad_art.py`;
+  the finished sprite is `tools/dad/dad_px.png`, the photo itself is not in the repo). He bobs, his eyes and
+  lenses glow red before each attack, flashes white when hit, gets sooty with a cracked lens as he weakens, and
+  goes out in a chain of explosions. Beating him clears Stage 1 ("DAD DEFEATED!", +3000) and you go on to Stage 2.
+* **He talks.** At his entrance he says "Naveed, I will destroy you!": a 2.3 s, 9 kHz BRR voice sample
+  (edge-tts, EQ'd and compressed, `tools/dad/make_voice.sh`) played by the SPC700 on the second SFX channel, with
+  the banner `NAVEED, I WILL DESTROY YOU!` on the HUD for about 3.8 s. Music and other sounds keep playing.
+* **A fair first boss.** He uses the same attacks as the robot (aimed cannon fans, volleys, the beam with its warning, shards), with 3/4 of
+  its health and longer breaks between attacks. Shoot his glasses (match his height). His fight is in chase view.
+* The Stage 4 robot boss is unchanged. Still a 1 MB LoROM FastROM cart with no enhancement chips.
+* Tested on snes9x, snes9x 1.55 (Delta) and Mesen-S: from the title through Stage 1, the dad's entrance, taunt,
+  voice, fight and defeat, into Stage 2. Separate test builds also beat him and the Stage 4 robot on all three cores.
+
 ### v1.5 (2026-11-20): graphics push
 
 ![v1.4 vs v1.5](docs/screenshots/before_after_v1_5.png)

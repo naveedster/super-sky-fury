@@ -1467,12 +1467,13 @@ RowHint:
   lda #27                   ; cockpit: bottom row of the dashboard (pause only)
   jsr RowFromMap
   lda paused
-  beq @set
-  ldy #.loword(TX_PAUSED)
+  bne :+
+  jmp @set
+: ldy #.loword(TX_PAUSED)
   lda #$3000
   ldx #$FF
   jsr PutTxt
-  bra @set
+  jmp @set
 @tx:
   lda #26
   jsr RowFromMap
@@ -1483,7 +1484,7 @@ RowHint:
   lda #$3000
   ldx #$FF
   jsr PutTxt
-  bra @set
+  jmp @set
 : lda paused
   beq :+
   jsr ClearRowBuf
@@ -1491,26 +1492,52 @@ RowHint:
   lda #$3000
   ldx #$FF
   jsr PutTxt
-  bra @set
-: lda b_aim
+  jmp @set
+: lda b_dad                ; v1.6: dad's taunt, entrance + early fight, on the dark HUD row
+  beq @nott
+  lda b_st
+  cmp #BS_ENTER
+  beq @taunt
+  cmp #BS_FIGHT
+  bne @nott
+  lda b_t
+  cmp #TAUNT_T-ENTER_T
+  bcs @nott
+@taunt:
+  jsr ClearRowBuf
+  ldy #.loword(TX_TAUNT)
+  lda #$3800
+  ldx #$FF
+  jsr PutTxt
+  jmp @set
+@nott:
+  lda b_aim
   beq :+
   lda warn_shown
   bne :+
   jsr ClearRowBuf
   ldy #.loword(TX_AIM)
+  lda b_dad
+  beq @aimr
+  ldy #.loword(TX_DADAIM)
+@aimr:
   lda #$3000
   ldx #$FF
   jsr PutTxt
-  bra @set
+  jmp @set
 : lda b_st
   cmp #BS_WARN
   bne :+
   jsr ClearRowBuf
   ldy #.loword(TX_APPROACH)
+  lda b_dad
+  beq @appr
+  ldy #.loword(TX_DADAPP)
+@appr:
   lda #$3800
   ldx #$FF
   jsr PutTxt
-  bra @set
+  jmp @set
 : lda warn_shown
   beq @set
   jsr ClearRowBuf

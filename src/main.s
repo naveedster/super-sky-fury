@@ -895,7 +895,12 @@ LoadView:
   bne :+
   DMA_VRAM ObjChase, $6000, 16384, $80, $18, $01
   bra :++
-: DMA_VRAM ObjChaseBoss, $6000, 16384, $80, $18, $01
+: lda b_dad
+  bne @chdad
+  DMA_VRAM ObjChaseBoss, $6000, 16384, $80, $18, $01
+  bra :+
+@chdad:
+  DMA_VRAM ObjChaseDad, $6000, 16384, $80, $18, $01     ; v1.6
 :
   DMA_VRAM MapText,  $5C00, 2048,  $80, $18, $01
   lda #NE_CH
@@ -1536,7 +1541,12 @@ Buttons:
   stz paused
   jmp PauseText
 @nowarp:
-  lda view
+  lda b_st                   ; v1.6: dad's fight stays in the chase view
+  beq :+
+  lda b_dad
+  beq :+
+  jmp @noview
+: lda view
   inc a
   cmp #3
   bcc :+
@@ -4272,7 +4282,7 @@ MapCock:  .incbin "../assets/map_cock.bin"
   .byte $00                       ; no SRAM
   .byte $01                       ; North America
   .byte $00                       ; developer
-  .byte $05                       ; version (v1.5)
+  .byte $06                       ; version (v1.6)
   .word $FFFF                     ; checksum complement (fixed by build)
   .word $0000                     ; checksum
 

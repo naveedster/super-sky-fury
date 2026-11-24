@@ -9,6 +9,25 @@ that name. The public overview is in the [README](../README.md).
 > They are excluded by `.gitignore` and are not in the repository. The release ROM is
 > `dist/super_sky_fury.sfc`. Current music renders are `music/{title,stage,boss,boss_victory}.{mp3,spc}`.
 
+## v1.6: the Stage 1 dad boss
+
+* **Engine:** the robot boss code (`src/boss.s`) with a `b_dad` flag set by the wave script (`T_BOSS, 1` at the end of
+  Stage 1; the Stage 4 `T_BOSS, 0` is the robot). The flag picks his palette (`DadPal`, palette 7, colours 13/14
+  animated in NMI for the pupils and lens glare), his own chase sprite sheet (`assets/obj_chase_dad.bin`, the robot
+  sheet with the robot cells swapped for 66 cells of the dad), his part list (`BP_DAD`, plus a damaged version below 1/3 HP),
+  texts, 3/4 HP, a +28-frame gap between attacks, and chase view only (the view button does nothing during his fight).
+* **Art:** `tools/dad/dad_art.py` builds the bust from the photo (background removal, white balance, CLAHE, head
+  enlarged 1.16x, quantised to a hand-picked 15-colour palette, drawn-in rimless lenses, brows and a gold crest).
+  The result is cached in `tools/dad/dad_px.png`, which the build uses when the photo is missing.
+* **Voice:** `tools/dad/make_voice.sh` (edge-tts en-US-ChristopherNeural, pitch down, high/low-pass, EQ, compressor,
+  limiter, 9000 Hz mono) to `music/dad_voice.wav`. `music/make_boss.py` encodes it as one-shot BRR sample 10
+  (11691 bytes at $90BE in the boss SPC image, 407 bytes below the echo buffer) and SFX B id 12 plays it at pitch $0480 with
+  priority 15 and a 150-frame lock, so nothing interrupts it.
+  It is checked by cross-correlating emulator audio with the source WAV (match at the entrance frame) and by an
+  isolated libgme render of the boss SPC (voice-only correlation 0.75).
+* **Text:** the taunt is on the dark HUD hint row (above his head it was hidden), in the red warning palette, from the
+  entrance until 230 frames after it. The font gained a comma.
+
 ## v1.5: graphics push (stock SNES, no enhancement chip)
 
 * **Frame budget first.** `ChaseTrails` now caches its OAM output (`ct_buf`): it does a full build every

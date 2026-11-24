@@ -51,3 +51,8 @@ __pycache__/
 .DS_Store
 *.swp
 *~
+
+# v1.6: the private reference photo and its cut-out stay out of the repo (dad_px.png is the finished sprite)
+tools/dad/dad_ref.jpg
+tools/dad/dad_cut.png
+tools/dad/__pycache__/

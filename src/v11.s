@@ -2379,7 +2379,7 @@ X_Nmi:
   sta CGADD
   A16
   ldx #0
-: lda f:BossPal,x           ; 7/8 brightness (v1.3: keep the white armour reading white)
+: lda f:$7E0000+bpal,x      ; 7/8 brightness (v1.3: keep the white armour reading white)
   lsr
   and #$3DEF
   sta n_t
@@ -2388,7 +2388,7 @@ X_Nmi:
   clc
   adc n_t
   sta n_t
-  lda f:BossPal,x
+  lda f:$7E0000+bpal,x
   lsr
   lsr
   lsr
@@ -2867,6 +2867,8 @@ WaveData:
   .word T_HEAD|G, .loword(-90), 950, 14, 0
   .word T_HEAD|G,  90, 950, 14, 0
   .word T_WAIT, 0, 0, 0, 60
+WarpDad:
+  .word T_BOSS, 1, 0, 0, 30          ; v1.6: Naveed's dad, the Stage 1 boss
 WarpS2:
   .word T_STAGE, 1, 0, 0, 90
   ; ======== STAGE 2: DESERT STORM
@@ -2935,7 +2937,7 @@ WaveBoss:
   .word T_LOOP, 0, 0, 0, 0
 ; WARP=n test builds: script position + stage
 WarpTab: .word WarpS2-WaveData, 0, WarpS3-WaveData, 1, WarpFort-WaveData, 2, WarpS4-WaveData, 2
-         .word WaveBoss-WaveData, 3
+         .word WaveBoss-WaveData, 3, WarpDad-WaveData, 0
 
 
 ; ================================================================ v1.1 sprite stacking
@@ -4118,6 +4120,19 @@ X_BossDraw:
   xba
   and #$FF00
   sta bd_t                   ; priority bits into the attr byte
+  lda b_dad                  ; v1.6: dad is one part (clean / sooty below 1/3 health)
+  beq @robot
+  lda #BP_DAD
+  ldx b_dark
+  beq :+
+  inc a
+: A8
+  sta bp_l+1
+  A16
+  lda #2
+  sta bp_e
+  jmp @sep
+@robot:
   ; ---- head yaw: toward you (screen centre), one step every 8 frames; straight ahead while the beam fires
   lda b_sx
   sec

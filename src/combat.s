@@ -455,6 +455,8 @@ Waves:
   iny
   cpy #NEN*2
   bne :-
+  lda f:WaveData+2,x         ; v1.6: x field = 1: the Stage 1 boss (dad)
+  sta b_dad
   jsr BossStart
   ldx wave_pos
   bra @adv

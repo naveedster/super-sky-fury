@@ -47,6 +47,8 @@ SB_BEAM    = SFXB_BEAM
 SB_SHARDW  = SFXB_SHARDW
 SB_MEGA    = SFXB_MEGABOOM
 SB_BMSL    = SFXB_BMSL
+SB_VOICE   = SFXB_VOICE
+TAUNT_T    = 230               ; v1.6: taunt banner frames from the entrance (ENTER_T = 168)
 RD_BOSS  = 32                 ; text row: boss health bar
 MU_FIELD = 0
 MU_BOSS  = 1
@@ -102,6 +104,8 @@ vs_view: .res 2
 b_palq:  .res 2
 bn_row:  .res 2               ; (NMI only)
 b_wt:    .res 2               ; 1 = upload BossPal, 2 = upload NavyPal (NMI)
+b_dad:   .res 2               ; v1.6: 1 = the Stage 1 boss (Naveed's dad), 0 = the robot
+bpal:    .res 32              ; v1.6: the running boss's palette (BossPal or DadPal), uploaded by the NMI
 eb_k:    .res NEB*2           ; enemy round kind: 0 tracer, 1 crest shard
 mu_img:  .res 2               ; ARAM image running: 0 field, 1 boss, $FF in transfer
 mu_want: .res 2
@@ -135,6 +139,22 @@ em_lim:   .res 2
 .i16
 ; ---------------------------------------------------------------- start / stop
 BossStart:
+  ldx #30                    ; v1.6: this boss's palette into RAM (BossNmi / X_Nmi upload it from there)
+  lda b_dad
+  bne @dp
+: lda f:BossPal,x
+  sta bpal,x
+  dex
+  dex
+  bpl :-
+  bra @pp
+@dp:
+: lda f:DadPal,x
+  sta bpal,x
+  dex
+  dex
+  bpl :-
+@pp:
   lda #BS_WARN
   sta b_st
   stz b_t
@@ -162,6 +182,13 @@ BossStart:
   cmp d_hpm
   bcc :+
   lda d_hpm                  ; (the bar maths needs hpmax/2 < 256)
+: ldx b_dad
+  beq :+
+  lsr                        ; v1.6: dad (stage 1) has 3/4 of the robot's health
+  sta t0
+  lsr
+  clc
+  adc t0
 : sta b_hp
   sta b_hpmax
   lda alt
@@ -176,7 +203,12 @@ BossStart:
   sta b_palq
   lda view
   cmp #VIEW_OVER             ; the overhead camera only sees ~100 px ahead: the fight is chase/cockpit
-  bne @persp
+  beq :+
+  ldx b_dad                  ; v1.6: dad is drawn for the chase camera only
+  beq @persp
+  cmp #VIEW_CHASE
+  beq @persp
+:
   lda #VIEW_CHASE
   sta view
   lda #2
@@ -201,6 +233,7 @@ BossAbort:
   bne :+
   rts
 : stz b_st
+  stz b_dad
   jsr SlotsField
   stz b_aim
   stz bm_on
@@ -337,7 +370,17 @@ BsWarn:
 : lda #BS_ENTER
   sta b_st
   stz b_t
-  lda #1
+  lda b_dad                  ; v1.6: "NAVEED! I WILL DESTROY YOU!" (BRR voice on channel B, top priority)
+.ifdef NOVOICE
+  lda #0
+.endif
+  beq :+
+  stz sfx_nk
+  lda #SB_VOICE
+  ldx #15
+  ldy #150
+  jsr SfxB
+: lda #1
   sta b_vis
   stz b_x
   lda #BZ_CAM
@@ -409,7 +452,15 @@ ClampGoal:                   ; keep the gem (and the eyes, 31 px above it) insid
   rts
 
 BsFight:
-  jsr BossRumble
+  lda b_dad                  ; v1.6: the taunt banner goes away TAUNT_T frames after the entrance
+  beq :+
+  lda b_t
+  cmp #TAUNT_T-ENTER_T
+  bne :+
+  lda row_dirty
+  ora #RD_ALL
+  sta row_dirty
+: jsr BossRumble
   jsr BossMoveXZ
   jsr BossBob
   jsr BossPhase
@@ -536,7 +587,11 @@ BsDying:
   adc t0                    ; 10 * loop
   clc
   adc #50                   ; bonus (x100 points): 5000 + 1000 per loop
-  sta b_bonus
+  ldx b_dad
+  beq :+
+  sec
+  sbc #20                    ; v1.6: dad: 3000 + 1000 per loop
+: sta b_bonus
   clc
   adc score
   cmp #10000
@@ -553,10 +608,16 @@ BsDying:
 
 BsDone:
   lda b_t
-  cmp #DONE_T
+  ldx b_dad
+  beq :+
+  cmp #170                   ; v1.6: dad: shorter, then STAGE CLEAR + rank and on to stage 2
+  bcs :++
+  rts
+: cmp #DONE_T
   bcs :+
   rts
 : stz b_st
+  stz b_dad
   jsr SlotsField
   lda #MU_FIELD
   sta mu_want
@@ -833,6 +894,11 @@ AtkDone:
   eor #$FFFF
   sec
   adc t0
+  ldx b_dad                  ; v1.6: Stage 1 boss: longer breathers between attacks
+  beq @gap
+  clc
+  adc #28
+@gap:
   cmp #36
   bcs :+
   lda #36
@@ -2006,7 +2072,42 @@ BossColors:
   lda b_st
   bne :+
   rts
-: ; eyes: slow red glow (white strobe when hit / crest glare)
+: lda b_dad
+  beq @robot
+  ; v1.6 dad: pupils (13) dark, glowing red while he telegraphs / attacks, white when hit;
+  ; lens glare (14) cool white, strobing red-white while he charges or fires the beam, white when hit
+  lda #$0C67
+  sta b_ceye
+  lda b_atk
+  ora bm_on
+  beq :+
+  lda frame
+  lsr
+  and #$000E
+  tax
+  lda f:EyeGlow,x
+  ora #$001F
+  sta b_ceye
+: lda b_fe
+  ora b_fb
+  beq :+
+  lda frame
+  and #2
+  beq :+
+  lda #$7FFF
+  sta b_ceye
+: lda #$7FBC
+  sta b_cgem
+  lda bm_on
+  ora b_fg
+  beq :+
+  lda frame
+  and #4
+  beq :+
+  lda #$1C9F
+  sta b_cgem
+: rts
+@robot: ; eyes: slow red glow (white strobe when hit / crest glare)
   lda frame
   lsr
   and #$000E
@@ -2054,7 +2155,7 @@ BossNmi:
   lda b_palq
   cmp #2
   beq @navy
-: lda f:BossPal,x
+: lda bpal,x
   A8
   sta CGDATA
   xba
@@ -2154,9 +2255,15 @@ BossNmi:
   adc #.loword(ObjChase)
   ldx #^ObjChase
   bra @dma
-: clc
+: ldx b_dad
+  bne :+
+  clc
   adc #.loword(ObjChaseBoss)
   ldx #^ObjChaseBoss
+  bra @dma
+: clc
+  adc #.loword(ObjChaseDad)
+  ldx #^ObjChaseDad
   bra @dma
 @sc:
   ldx b_gfx
@@ -2402,9 +2509,13 @@ BossSky:
   sta t5
   lda b_st
   cmp #BS_WARN
-  beq @warn
-  cmp #BS_DONE
-  beq @done
+  bne :+
+  jmp @warn
+: cmp #BS_DONE
+  bne :+
+  jmp @done
+: ; v1.6: dad's taunt banner moved to the HUD hint row (RowHint), clear of his head
+@no:
   clc
   rts
 @warn:
@@ -2462,6 +2573,10 @@ BossSky:
   cmp #2
   bne :+
   ldy #.loword(TX_MISSION)
+  lda b_dad
+  beq @misr
+  ldy #.loword(TX_DADWIN)
+@misr:
   lda #$3000
   ldx #$FF
   jsr PutTxt
@@ -2728,6 +2843,8 @@ ap_eye:  .res 2
 .segment "BANK7"
 ObjChaseBoss: .incbin "../assets/obj_chase_boss.bin"
 ObjCockBoss:  .incbin "../assets/obj_cock_boss.bin"
+.segment "BANK14"
+ObjChaseDad:  .incbin "../assets/obj_chase_dad.bin"   ; v1.6: the Stage 1 boss's chase sheet
 .segment "BANK8"
 BossUpBin:    .incbin "../music/build/boss_up.bin"
 .segment "BANK9"

@@ -1711,7 +1711,7 @@ lvb: mov a,$3f
 '''
 
 SFX_A_BOSS = {11: 'bcannon', 12: 'charge', 13: 'shards', 14: 'ping', 15: 'weak'}
-SFX_B_BOSS = {7: 'rumble', 8: 'beam', 9: 'shardw', 10: 'megaboom', 11: 'bmsl'}
+SFX_B_BOSS = {7: 'rumble', 8: 'beam', 9: 'shardw', 10: 'megaboom', 11: 'bmsl', 12: 'voice'}
 SFX_B_TITLE = {13: 'menu_l', 14: 'menu_r', 15: 'menu_ok'}   # title image only
 
 SFX_A_FIELD = {11: 'tink'}       # v1.1, field image only: armour hit (streams live in page 1)
