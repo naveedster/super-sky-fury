@@ -12,7 +12,7 @@ T_FORT   = 11               ; sky fortress: mid-boss, holds station ahead, wing 
 T_STAGE  = $83              ; script: next stage (fade, new ground / sky / haze, banner)
 SA_TINK  = 11               ; field image: bullet on armour (live pan)
 SB_PICKUP = 13              ; field image: power-up collected
-NPU      = 2                ; power-up capsules in the air
+NPU      = 4                ; power-up capsules in the air (v1.7: + star medals)
 NPOP     = 2                ; floating score / damage numbers (2 dynamic 32x16 OBJ slots)
 NFX      = 4                ; impact sparks (screen space)
 PU_LIFE  = 540
@@ -252,6 +252,7 @@ T_ScoreAdd:  clc                 ; v1.2: A = points (x100) -> score, HUD, extra 
 
 ; ---------------------------------------------------------------- game start / restart
 X_GameInit:                 ; (InitCombat: LoadStatic has just loaded map A + the stage-0 palette)
+  jsl X17_NewGame            ; v1.7: no checkpoint yet
   jsl X14_Reset              ; v1.4
   stz cur_map
   stz cur_pal
@@ -267,6 +268,7 @@ X_Restart:                  ; (RestartGame: back to stage 1, reload the world if
 : rtl
 
 ResetRun:
+  jsr X17_Reset              ; v1.7
   jsr PrRevive
   lda #$0F
   sta bright
@@ -456,6 +458,7 @@ X_SpawnInit:
 
 ; ---------------------------------------------------------------- per physics step
 X_Step:
+  jsr X17_Step               ; v1.7: stage set pieces (wind, flak)
   ; combo window, power-up timers
   lda combo_t
   beq :+
@@ -855,6 +858,7 @@ X_KillPts:
   sta combo_n
 : lda #COMBO_T
   sta combo_t
+  jsr X17_MedalDrop          ; v1.7: star medals
   inc pu_kc                 ; every 7th kill leaves a capsule too
   lda pu_kc
   cmp #7
@@ -1042,6 +1046,7 @@ PuStep:
   jmp @n
 : dec pu_t,x
   bne :+
+  jsr PuGone
   jmp @n
 : stx x_i
   lda pu_z,x                ; your turn swings it round you, flying forward brings it closer
@@ -1061,6 +1066,7 @@ PuStep:
   cmp #.loword(-60*16)
   bpl :+
   stz pu_t,x
+  jsr PuGone
   bra @n
 : cmp #160*16              ; magnet: inside 160 px it drifts in towards your nose
   bpl @nm
@@ -1102,8 +1108,21 @@ PuStep:
   jmp @l
 : rts
 
-; A = kind 0 spread, 1 rapid missiles, 2 shield
+; v1.7: a power-up left the sky uncollected (X = slot): a medal breaks the ladder
+PuGone:
+  lda pu_k,x
+  cmp #PU_MEDAL
+  bne :+
+  phx
+  jsr X17_MedalMiss
+  plx
+: rts
+; A = kind 0 spread, 1 rapid missiles, 2 shield (v1.7: 3 = star medal)
 Collect:
+  cmp #PU_MEDAL
+  bne @nmd
+  jmp X17_MedalGet
+@nmd:
   cmp #1
   beq @m
   bcs @s
@@ -2189,13 +2208,8 @@ X_Project:
   jsl T_Project
   bcc @pun0
   ldx x_i
-  lda #$04
-  ora obj_pri
-  sta o_a
-  lda pu_k,x
-  clc
-  adc #F_PU_P
-  jsr AddO
+  jsr X17_PuDraw             ; v1.7: capsule or star medal
+
   lda #$70
   tsb tb_bld
 @pun0:
@@ -2857,6 +2871,17 @@ WaveData:
   .word T_DART, .loword(-100), 1120, 10, 0
   .word T_DART,  100, 1120, 10, 0
   .word T_WAIT, 0, 0, 0, 60
+  .word T_EVENT, EV_CHECK, 0, 0, 60  ; v1.7: checkpoint
+  ; v1.7 set piece: a bomber convoy in line abreast with dart escorts (medals x2 for 15 s)
+  .word T_EVENT, EV_CONVOY, 900, 0, 90
+  .word T_BOMBER|G, .loword(-130), 820, 0, 0
+  .word T_BOMBER|G,    0, 760, 0, 0
+  .word T_BOMBER|G,  130, 820, 0, 40
+  .word T_DART, .loword(-200), 1000, 12, 0
+  .word T_DART,  200, 1000, 12, 60
+  .word T_DART, .loword(-60), 1050, 18, 0
+  .word T_DART,   60, 1050, 18, 0
+  .word T_WAIT, 0, 0, 0, 60
   ; overtakers, then one sits on your tail and lets a missile go
   .word T_OVER, .loword(-30), .loword(-110), 8, 45
   .word T_OVER, 30, .loword(-110), 8, 60
@@ -2867,16 +2892,23 @@ WaveData:
   .word T_HEAD|G, .loword(-90), 950, 14, 0
   .word T_HEAD|G,  90, 950, 14, 0
   .word T_WAIT, 0, 0, 0, 60
+  .word T_EVENT, EV_CHECK, 0, 0, 30  ; v1.7: checkpoint before the boss
 WarpDad:
   .word T_BOSS, 1, 0, 0, 30          ; v1.6: Naveed's dad, the Stage 1 boss
 WarpS2:
   .word T_STAGE, 1, 0, 0, 90
   ; ======== STAGE 2: DESERT STORM
+  .word T_EVENT, EV_CHECK, 1, 0, 0   ; v1.7: (silent) checkpoint at the stage start
   ; swoopers out of the sun
   .word T_SWOOP|G, .loword(-60), 950, 0, 28
   .word T_SWOOP|G,  60, 980, 0, 28
   .word T_SWOOP|G|M,  0, 1010, 0, 0
   .word T_WAIT, 0, 0, 0, 50
+  ; v1.7 set piece: a sandstorm blows in (gusting crosswind, the dust closes in)
+  .word T_EVENT, EV_STORM, 1260, 0, 90
+  .word T_HEAD|G, .loword(-80), 950, 20, 30
+  .word T_HEAD|G,   80, 950, 20, 0
+  .word T_WAIT, 0, 0, 0, 40
   ; crossers from both sides, two kamikazes through the middle
   .word T_CROSSL, 480, 420, 0, 24
   .word T_CROSSR, .loword(-480), 360, 0, 24
@@ -2891,6 +2923,7 @@ WarpS2:
   .word T_DART,   90, 1000, 16, 0
   .word T_DART,  150, 1000, 16, 0
   .word T_WAIT, 0, 0, 0, 60
+  .word T_EVENT, EV_CHECK, 0, 0, 30  ; v1.7: checkpoint
   ; two bombers side by side
   .word T_BOMBER|G, .loword(-70), 760, 0, 0
   .word T_BOMBER|G,  70, 800, 0, 0
@@ -2898,10 +2931,18 @@ WarpS2:
 WarpS3:
   .word T_STAGE, 2, 0, 0, 90
   ; ======== STAGE 3: ARCTIC FRONT
+  .word T_EVENT, EV_CHECK, 1, 0, 0   ; v1.7: (silent) checkpoint at the stage start
   .word T_DART,    0, 1000, 22, 6
   .word T_DART, .loword(-60), 1070, 22, 0
   .word T_DART,   60, 1070, 22, 0
   .word T_HEAD|G|M,  0, 1100, 18, 0
+  .word T_WAIT, 0, 0, 0, 50
+  ; v1.7 set piece: a blizzard (crosswind gusts, white-out haze) with kamikazes diving out of it
+  .word T_EVENT, EV_STORM, 1200, 0, 90
+  .word T_KAMI, .loword(-100), 1000, 0, 40
+  .word T_KAMI,  100, 1000, 0, 40
+  .word T_DART, .loword(-60), 1050, 24, 0
+  .word T_DART,   60, 1050, 24, 0
   .word T_WAIT, 0, 0, 0, 50
   .word T_OVER,  26, .loword(-110), 10, 40
   .word T_TAIL|M, .loword(-40), .loword(-175), 0, 60
@@ -2909,12 +2950,14 @@ WarpS3:
   .word T_KAMI,  160, 1000, 0, 20
   .word T_KAMI,    0, 1050, 0, 0
   .word T_WAIT, 0, 0, 0, 80
+  .word T_EVENT, EV_CHECK, 0, 0, 30  ; v1.7: checkpoint before the fortress
 WarpFort:
   .word T_FORT|G|M,  0, 1000, 0, 0
   .word T_WAIT, 0, 0, 0, 90
 WarpS4:
   .word T_STAGE, 3, 0, 0, 90
   ; ======== STAGE 4: NIGHT RAID
+  .word T_EVENT, EV_CHECK, 1, 0, 0   ; v1.7: (silent) checkpoint at the stage start
   .word T_OVER,  26, .loword(-110), 10, 30
   .word T_CROSSL, 480, 420, 0, 30
   .word T_CROSSR, .loword(-480), 340, 0, 40
@@ -2925,12 +2968,20 @@ WarpS4:
   .word T_KAMI, .loword(-120), 1000, 0, 30
   .word T_KAMI,  120, 1000, 0, 0
   .word T_WAIT, 0, 0, 0, 50
+  ; v1.7 set piece: flak barrage over the city (bursts ahead that throw tracers) under a dart attack
+  .word T_EVENT, EV_FLAK, 900, 0, 60
+  .word T_DART, .loword(-120), 1000, 20, 30
+  .word T_DART,  120, 1000, 20, 30
+  .word T_CROSSL, 480, 420, 0, 40
+  .word T_CROSSR, .loword(-480), 360, 0, 0
+  .word T_WAIT, 0, 0, 0, 60
   .word T_DART, .loword(-80), 1000, 26, 0
   .word T_DART,   80, 1000, 26, 10
   .word T_SWOOP|G|M,  0, 950, 0, 30
   .word T_HEAD|G, .loword(-90), 950, 14, 0
   .word T_HEAD|G,  90, 950, 14, 0
   .word T_WAIT, 0, 0, 0, 90
+  .word T_EVENT, EV_CHECK, 0, 0, 30  ; v1.7: checkpoint before the boss
 WaveBoss:
   .word T_BOSS, 0, 0, 0, 30
   .word T_STAGE, 0, 0, 0, 30

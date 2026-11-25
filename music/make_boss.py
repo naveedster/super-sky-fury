@@ -302,7 +302,7 @@ def boss_sfx():
         s.step(120 * (1 - k / 10), 0x0C00 - k * 0x60, DYN, kon=(k == 0))
     out['bcannon'] = s.end()
     # v1.6 voice line: one key-on at 9 kHz, centre, then hold the channel until the sample has played out
-    s = Sfx().src('voice')
+    s = Sfx().src('voice').duck()              # v1.7: music at -12 dB under the line
     s.step(124, 0x0480, mm.panb(0.0), kon=True)
     s.hold(int(math.ceil(2.45 / (BOSS_DIV / 8000))))
     out['voice'] = s.end()

@@ -1514,6 +1514,10 @@ Buttons:
   lda go_t                  ; game over: START plays again
   cmp #60
   bcc @noview
+  lda cp_ok                 ; v1.7: from the last checkpoint
+  beq @gtt
+  jmp T_Continue
+@gtt:
 .ifdef SKIPTITLE
   jmp RestartGame
 .else
@@ -1526,7 +1530,19 @@ Buttons:
   jsr PauseText
 @nostart:
   lda gameover
-  bne @noview
+  beq @nsel
+  lda joy_new               ; v1.7: game over: SELECT = title
+  and #KEY_SELECT
+  beq @noview
+  lda go_t
+  cmp #60
+  bcc @noview
+.ifdef SKIPTITLE
+  jmp RestartGame
+.else
+  jmp GoTitle
+.endif
+@nsel:
   lda joy_new
   and #KEY_SELECT            ; (v1.4: X is the charge shot)
   beq @noview
@@ -1626,7 +1642,11 @@ Physics:
   beq :+
   lda #$0280
   sta t0
-: lda turnrate
+: lda t0                    ; v1.7: crosswind (sandstorm / blizzard)
+  clc
+  adc wind
+  sta t0
+  lda turnrate
   sec
   sbc t0
   beq @td
@@ -4075,7 +4095,10 @@ BuildOver:
   ora gameover
   beq :+
   jmp @nosh0
-: lda bankf
+: lda p_inv                 ; v1.7: blinks with the jet after a hit (it used to stay behind)
+  and #4
+  bne @nosh0
+  lda bankf
   jsr Abs
   asl
   tax
@@ -4216,6 +4239,7 @@ TrailCommon:
 .include "title.s"
 .include "v11.s"
 .include "v14.s"
+.include "v17.s"
 .include "../music/build/apu_upload.inc"
 
 ; =====================================================================
@@ -4282,7 +4306,7 @@ MapCock:  .incbin "../assets/map_cock.bin"
   .byte $00                       ; no SRAM
   .byte $01                       ; North America
   .byte $00                       ; developer
-  .byte $06                       ; version (v1.6)
+  .byte $07                       ; version (v1.7)
   .word $FFFF                     ; checksum complement (fixed by build)
   .word $0000                     ; checksum
 

@@ -105,6 +105,7 @@ def make_samples():
     nz *= np.exp(-t / 0.07)
     y = 0.8 * tone + 0.75 * nz
     y = np.tanh(y * 1.3)
+    n = int(0.228 * SR); y = y[:n]                 # v1.7: tail (-28 dB) trimmed 12 ms: ARAM for the voice duck
     S['snare'] = dict(y=norm(y * np.minimum(1, (n - np.arange(n)) / 300)), loop=None, f0=None, rate=SR)
     # Closed hat (32 kHz)
     n = int(0.05 * SR); t = np.arange(n) / SR
@@ -933,6 +934,8 @@ class Sfx:
         while n > 0:
             k = min(n, 255); self.b += bytes((0xFD, k)); n -= k
         return self
+    def duck(self):
+        self.b += bytes((0x7F,)); return self
     def end(self):
         self.b += bytes((0xFF,)); return bytes(self.b)
 
@@ -1100,6 +1103,8 @@ start:
   mov $f1,#$31            ; timer0 on, clear the input ports, IPL ROM off
   mov a,#0
   mov $22,a               ; SFX channel A idle
+  mov $58,a               ; v1.7: music not ducked
+  mov $59,a
   mov $2a,a               ; SFX channel B idle
   mov $30,a               ; SFX key-on bits for this tick
   mov $31,#$ff            ; voices the music owns (KON/KOFF mask)
@@ -1256,6 +1261,20 @@ wo:
   beq wsb_p
   pop a
 wout:
+  bbc $58.0,wraw          ; v1.7: music ducked (-12 dB) while a voice line plays
+  push a
+  mov a,y
+  and a,#$8e
+  bne wrawp
+  pop a
+  cmp a,#$80
+  ror a
+  cmp a,#$80
+  ror a
+  bra wraw
+wrawp:
+  pop a
+wraw:
   mov $f2,y
   mov $f3,a
   ret
@@ -1278,6 +1297,76 @@ wsb_p:
   bra wout
 wskip:
   pop a
+  ret
+; v1.7 duck on / off: scale the live VOL L/R of every voice the music owns by 1/4 (on) or 4 (off)
+duckon:
+  bbs $58.0,dkr
+  mov $58,#1
+  mov $59,$47             ; the voice whose stream ducked
+  mov x,#0
+  mov y,#1
+dkl:
+  mov a,y
+  and a,$31
+  beq dkn
+  mov $f2,x
+  mov a,$f3
+  cmp a,#$80
+  ror a
+  cmp a,#$80
+  ror a
+  mov $f3,a
+  inc x
+  mov $f2,x
+  mov a,$f3
+  cmp a,#$80
+  ror a
+  cmp a,#$80
+  ror a
+  mov $f3,a
+  dec x
+dkn:
+  mov a,x
+  clrc
+  adc a,#$10
+  mov x,a
+  mov a,y
+  asl a
+  mov y,a
+  bne dkl
+dkr:
+  ret
+duckoff:
+  bbc $58.0,dfr
+  mov $58,#0
+  mov x,#0
+  mov y,#1
+dfl:
+  mov a,y
+  and a,$31
+  beq dfn
+  mov $f2,x
+  mov a,$f3
+  asl a
+  asl a
+  mov $f3,a
+  inc x
+  mov $f2,x
+  mov a,$f3
+  asl a
+  asl a
+  mov $f3,a
+  dec x
+dfn:
+  mov a,x
+  clrc
+  adc a,#$10
+  mov x,a
+  mov a,y
+  asl a
+  mov y,a
+  bne dfl
+dfr:
   ret
 cmd:
   cmp a,#$fc
@@ -1399,6 +1488,9 @@ rb: mov a,$f6
   beq nob_b
   clrc
   adc a,#16
+  push a
+  call duckoff            ; v1.7: a new channel-B sound cuts a voice line short: un-duck
+  pop a
   mov x,#8
   call sstart
 nob_b:
@@ -1447,6 +1539,11 @@ snend:
   mov $f3,a
   bra sparse
 snsrc:
+  cmp a,#$7f
+  bne snduck
+  call duckon             ; v1.7: $7F (never a step: volumes stop at 124) = duck the music for this stream
+  bra sparse
+snduck:
   cmp a,#$fd
   bne sstep
   mov a,[$40]+y
@@ -1486,6 +1583,11 @@ cpout: mov a,!$0040+y
 sdone:
   ret
 send:
+  mov a,$47
+  cmp a,$59
+  bne snodk
+  call duckoff            ; v1.7: the stream that ducked the music has ended
+snodk:
   mov a,$47
   mov $f2,a
   mov $f3,#0              ; VOL L 0

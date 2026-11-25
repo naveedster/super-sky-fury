@@ -463,6 +463,12 @@ Waves:
 @nb:
   cmp #T_LOOP
   beq @lp
+  cmp #T_EVENT               ; v1.7: checkpoint / stage set piece
+  bne @nev
+  jsl X17_Event
+  ldx wave_pos
+  bra @adv
+@nev:
   cmp #T_STAGE               ; v1.1: next stage (fade, new world, banner)
   bne @spawn
   jsl X_WaveStage

@@ -143,6 +143,30 @@ For the full test methodology and the hardware-safety rules the code follows, se
 
 ## Changelog
 
+### v1.7 (2026-11-25): Medals, set pieces, checkpoints, new explosions
+
+![v1.6 vs v1.7](docs/screenshots/before_after_v1_7.png)
+
+* **Score medals.** Every second kill drops a twinkling medal. Each one you catch is worth the next step on the
+  ladder (100, 200, 300, 500, 800, 1000, 1500, 2000, 3000, 5000), shown as an orange "+N00" popup where you
+  caught it; at the top it pays 5000 each ("MEDALS MAXED!"). Let a medal fall past you and the ladder resets
+  ("MEDAL CHAIN LOST" once you were on a good run). The stage rank now counts medals too.
+* **A set piece in every stage.** Ocean: a bomber convoy flying line abreast with dart escorts, medals x2 while
+  it lasts. Desert: a sandstorm with a gusting crosswind that pushes you sideways and thick sand haze.
+  Arctic: a blizzard (crosswind plus white-out haze) full of kamikazes. Night city: a flak barrage, with shells
+  bursting around you that throw shrapnel, so keep moving.
+* **Checkpoints and continue.** Each stage has mid-stage checkpoints ("CHECKPOINT!"). At game over, press START
+  to continue from the last one with full lives (the score restarts), or SELECT for the title screen.
+* **Difficulty curve:** enemy bursts come slower in Stage 1 and faster by Stage 4. Rank thresholds are retuned
+  (S 96 / A 80 / B 56).
+* **New explosions:** glossy pre-rendered fireballs (lit billows, a white-hot core and flash spikes), a cooling
+  frame with a shockwave ring and flying debris, and ember-lit smoke puffs (`tools/boom17.py`).
+* **Dad is louder than the music.** The music ducks by about 12 dB while he says "Naveed, I will destroy you!",
+  and comes back when the line ends. The comma in his banner is now a real comma.
+* Flying through a cloud is a light mist you can see through instead of a white-out. In overhead view the jet's
+  shadow now blinks with the jet after a hit instead of staying behind.
+* Still a 1 MB LoROM FastROM cart with no enhancement chips.
+
 ### v1.6 (2026-11-20): Dad is the Stage 1 boss
 
 ![Dad boss](docs/screenshots/dad_boss.png)

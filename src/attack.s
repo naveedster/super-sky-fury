@@ -431,6 +431,14 @@ EnemyFire:
   eor #$FFFF
   sec
   adc d_fire                ; 110 (NORMAL; 150 easy, 80 hard) - 8*loop + 0..31 frames between bursts
+  pha                       ; v1.7 difficulty curve: + 24 / 10 / 0 / -10 frames by stage
+  lda stage
+  and #3
+  asl
+  tay
+  pla
+  clc
+  adc StFireAdj,y
   clc
   adc t0
   sta en_cd,x
@@ -1270,6 +1278,7 @@ GameOverView:
   sta row_dirty
   rts
 
+StFireAdj: .word 24, 10, 0, .loword(-10)
 RestartGame:
   jsr BossAbort
   stz score
@@ -1331,9 +1340,12 @@ FxCommit:
   bcc :+
   lda #5
 : asl
-  cmp cl_fog                ; v1.5: flying through a cloud whites the picture out
+  sta t0
+  lda cl_fog                ; v1.7: a cloud pass is a light see-through mist (was a white-out)
+  lsr
+  cmp t0
   bcs :+
-  lda cl_fog
+  lda t0
 : sta c_flash
   rts
 
@@ -1481,6 +1493,10 @@ RowHint:
   beq :+
   jsr ClearRowBuf
   ldy #.loword(TX_PRESS)
+  lda cp_ok                 ; v1.7: a checkpoint to continue from
+  beq @nocp
+  ldy #.loword(TX_CONT)
+@nocp:
   lda #$3000
   ldx #$FF
   jsr PutTxt

@@ -1136,6 +1136,11 @@ X15_Shadow:
   rtl
 .endif
   lda b_gfx                  ; (the boss sheet has no shadow tile)
+  ora p_dead                 ; v1.7: not while shot down, and blinking with the jet after a hit
+  ora gameover
+  bne @r
+  lda p_inv
+  and #4
   bne @r
   ldx lev
   lda f:ShadowY,x            ; precomputed ground-point projection per altitude level
@@ -1267,6 +1272,44 @@ X15_Sun:
 @lv:
   stx x15_lv
 @hz:
+  lda ev_k                   ; v1.7: sandstorm / blizzard: StormTab[stage][level by ev_t]
+  cmp #EV_STORM
+  bne @hzn
+  lda ev_t
+  beq @hzn
+  ldx #3
+  cmp #48
+  bcc @stl
+  lda ev_len
+  sec
+  sbc ev_t
+@stl:
+  lsr
+  lsr
+  lsr
+  lsr                        ; 16 frames per level (in and out)
+  cmp #3
+  bcs :+
+  tax
+: stx x15_f
+  lda stage
+  asl
+  asl
+  ora x15_f
+  sta x15_f
+  xba
+  sta x15_i
+  lda x15_f
+  asl
+  asl
+  asl
+  asl
+  clc
+  adc x15_i
+  adc #.loword(StormTab)
+  sta stg_hz
+  rtl
+@hzn:
   lda stage                  ; ch 7 table = GlareTab[stage][level]
   asl
   asl
@@ -1468,14 +1511,19 @@ RankBuild:
   lda #20
 : clc
   adc x14_a
+  sta x14_a                  ; v1.7: + the medal ladder (0..9), thresholds S 96 / A 80 / B 56
+  lda md_lv
+  lsr
+  clc
+  adc x14_a
   ldy #FONT_S
-  cmp #100
+  cmp #96
   bpl @rk
   ldy #FONT_A
-  cmp #82
+  cmp #80
   bpl @rk
   ldy #FONT_B
-  cmp #60
+  cmp #56
   bpl @rk
   ldy #FONT_C
 @rk:
@@ -1625,6 +1673,7 @@ ShimTab: .incbin "../assets/shim.bin"
 .segment "SKYB"
 SkyPh: .incbin "../assets/skyph.bin"     ; v1.5: 4 stages x 16 animated sky tables
 GlareTab: .incbin "../assets/glare.bin"
+StormTab: .incbin "../assets/storm.bin"  ; v1.7: 4 stages x 4 levels of sandstorm / blizzard haze
 .segment "BANDB"
 BandTiles: .incbin "../assets/bands.bin"   ; v1.5: 4 stages x 2 KB BG3 band tiles
 BandMaps:  .incbin "../assets/bandmaps.bin"
