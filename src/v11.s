@@ -3008,57 +3008,22 @@ SS_Reset:                    ; sheet (re)loaded from ROM: slots hold their place
   inx
   cpx #SS_SLOTS*2
   bne :-
-  stz js_have
-  stz js_want
+  lda #JS_LEVEL              ; v1.8: the sheet's placeholder is the level frame
+  sta js_have
+  sta js_want
+  lda #4
+  sta js_nose
+  stz js_bl
   lda #$FFFF                 ; v1.2: tumbling frames are back to frame 0 of the sheet: re-upload
   sta tb_tab
-  rts
+  jmp X18_MsReset
 
 ; chase jet: frame from bank (|turnrate|, 5 steps) and climb / dive; h-flip when banking left
 X_JetFrame:
   lda roll_t                 ; v1.4: barrel roll
   beq :+
-  jml X14_JetFrame
-: lda turnrate
-  bpl :+
-  eor #$FFFF
-  inc a
-: ldx #0
-  cmp #$50
-  bcc @r
-  inx
-  cmp #$B8
-  bcc @r
-  inx
-  cmp #$128
-  bcc @r
-  inx
-  cmp #$1A0
-  bcc @r
-  inx
-@r:
-  stx x_t
-  lda climb
-  beq @lv
-  bmi :+
-  lda #5
-  bra @p
-: lda #10
-  bra @p
-@lv:
-  lda #0
-@p:
-  clc
-  adc x_t
-  sta js_want
-  lda #T_CHASE_JETS
-  sta stile
-  lda #$30
-  ldx turnrate
-  bpl :+
-  ora #$40
-: sta sattr
-  rtl
+  jml X18_RollFrame          ; v1.8: 64 roll angles
+: jml X18_JetFrame           ; v1.8: 17 banks x 5 eased nose pitches
 
 ; near / medium enemy frame (chase: 16 / 8 directions of the voxel model; cockpit: the static frames)
 ; in: X = enemy, t1 = depth, o_a = attr.  out: carry clear + A = logical frame, or carry set = small (caller)
@@ -3080,39 +3045,10 @@ X_EnFrame:
   rtl
 @ch:
   cmp #82
-  bcs @med
-  lda en_hd,x
-  clc
-  adc #$0800
-  xba
-  lsr
-  lsr
-  lsr
-  lsr
-  and #$000F
-  cmp #9
   bcc :+
-  eor #$FFFF
-  clc
-  adc #17
-  pha
-  lda o_a
-  eor #$40
-  sta o_a
-  pla
-: phx
-  jsr SlotGet
-  plx
-  cmp #$FFFF
-  bne :+
-  lda #F_EL_TOW
-  clc
-  rtl
-: clc
-  adc #F_SLOT0
-  clc
-  rtl
-@med:
+  jml X18_EnMed              ; v1.8: medium range streams 64 yaws x 3 banks too
+: jml X18_EnNear             ; v1.8: 64 yaws x 3 banks, slot re-targeted in place
+X18_MedOld:                  ; (boss sheet up: the old static 8 directions)
   lda en_hd,x
   clc
   adc #$1000
@@ -3689,7 +3625,7 @@ X_Props:
   cmp #12
 .endif
   bcc @mid
-  ; near: 16 yaws, streamed (the mid-size frame stands in until the slot is loaded)
+  ; near: 32 yaws (v1.8), streamed (the mid-size frame stands in until the slot is loaded)
   lda f:PropOff+6,x
   xba
   asl
@@ -3699,13 +3635,20 @@ X_Props:
   sec
   sbc heading
   clc
+.ifdef PROP16
   adc #$0800
+.else
+  adc #$0400                 ; v1.8: 32 yaws
+.endif
   xba
   lsr
   lsr
   lsr
-  lsr
-  and #$000F
+.ifdef PROP16
+  and #$001E
+.else
+  and #$001F
+.endif
   sta pr_m
   lda stage                  ; v1.2: this stage's model for the slot
   asl
@@ -3968,7 +3911,8 @@ X_Stream:
   lda view
   beq :+
   rtl
-: lda b_gfx
+: jsr X18_MsBg               ; v1.8
+  lda b_gfx
   beq @nb
   cmp #2
   beq :+
@@ -3995,25 +3939,35 @@ X_Stream:
   lda js_want
   cmp js_have
   beq @slots
+  jsr X18_JetGate            ; v1.8: at most every other vblank (30 Hz) and not while the game lags
+  bcs @slots
   jsr SS_Line
   cmp #18
   bcc :+
   jmp @slots
 : A8
-  lda #^JetFrames
+  A16
+  lda js_want                ; v1.8: 16 frames per bank from JetFrames ($A0)
+  lsr
+  lsr
+  lsr
+  lsr
+  clc
+  adc #^JetFrames
+  A8
   sta A1B0
   A16
   lda js_want
+  and #$000F
   xba
   asl
   asl
   asl
-  clc
-  adc #.loword(JetFrames)
+  ora #$8000
   sta n_t                    ; source
   lda #T_CHASE_JETS*16+$6000
   sta n_k                    ; VRAM word address
-  ldx #8
+  jsr X18_JetRows            ; v1.8: only the tile rows either frame uses -> X = rows
 : lda n_k
   sta VMADDL
   clc
@@ -4037,7 +3991,7 @@ X_Stream:
 @slots:
   lda b_gfx
   beq :+
-  rtl
+  jml X18_FxStream           ; v1.8: boss sheet resident: only the fx cells stream
 : stz ss_up
   ldy #0
 @sl:
@@ -4055,21 +4009,7 @@ X_Stream:
   bcc @rf29831
   jmp @r
 @rf29831:
-  lda ss_want,y
-  sec
-  sbc #SS_PR
-  bcs @spr
-  adc #SS_PR
-  xba
-  asl                        ; * 512
-  clc
-  adc #.loword(SlotFrames)
-  sta n_t
-  A8
-  lda #^SlotFrames
-  bra @sbk
-@spr:                        ; ground prop frame m: bank $90 + m/64, offset (m & 63) * 512
-.a16
+  lda ss_want,y              ; v1.8: slot frame m (enemies, then props from SS_PR): bank ^SlotFrames + m/64
   pha
   and #$003F
   xba
@@ -4084,7 +4024,7 @@ X_Stream:
   lsr
   lsr
   clc
-  adc #^PropFrames
+  adc #^SlotFrames
   A8
 @sbk:
   sta A1B0
@@ -4130,7 +4070,7 @@ X_Stream:
   beq @r
   jmp @sl
 @r:
-  rtl
+  jml X18_MedStream          ; v1.8
 
 ; lines since vblank began (A16 out); 37+ = vblank is over
 SS_Line:
@@ -4179,8 +4119,11 @@ X_BossDraw:
   inc a
 : A8
   sta bp_l+1
+  clc
+  adc #2                     ; v1.8: + his chest (breathes under the head)
+  sta bp_l+2
   A16
-  lda #2
+  lda #3
   sta bp_e
   jmp @sep
 @robot:
@@ -4324,6 +4267,15 @@ X_BossDraw:
   and #$00FF
   sta bp_k                   ; part id
   ; per-part offset: arms breathe 1 px, the firing arm kicks up 3 px
+  lda b_dad                  ; v1.8: dad: the chest rises dv_br px
+  beq @rob
+  lda b_sy
+  cpx #2
+  bne @noff
+  sec
+  sbc dv_br
+  bra @noff
+@rob:
   lda b_sy
   cpx #2
   bcc @noff
@@ -4338,8 +4290,19 @@ X_BossDraw:
   cmp b_side
   bne :+
   pla
+  sta bp_sy                  ; v1.8: the kick eases back (3, 3, 3, 2, 1, 1 px over the flash)
+  lda b_mf
+  cmp #4
+  bcc @k1
+  lda #3
+  bra @k2
+@k1:
+  inc a
+  lsr
+@k2:
+  eor #$FFFF
   sec
-  sbc #3
+  adc bp_sy
   pha
 : pla
 @noff:
@@ -4776,22 +4739,51 @@ M7TilesB: .incbin "../assets/m7tilesB.bin"
 
 .segment "CODE"
 
-.segment "BANK13"
-JetFrames:  .incbin "../assets/jetframes.bin"     ; 15 x 64x64 (8 rows of 8 tiles)
 .segment "BANK15"
 PropMid: .incbin "../assets/propmid.bin"         ; per stage: 4 mid + 4 far 16x16 prop frames
 TumbleFrames: .incbin "../assets/tumble.bin"      ; 8 sets x 8 frames x 16x16 (v1.2)
-.segment "BANK14"
-SlotFrames: .incbin "../assets/slotframes.bin"   ; 32x32 (4 rows of 4 tiles): 9 enemy yaws
-; v1.2: near ground prop frames (13 models x 16 yaws x 512 B), 64 frames per bank from $90
-.segment "PROPB0"
-PropFrames: .incbin "../assets/propframes.bin", 0, 32768
-.segment "PROPB1"
-  .incbin "../assets/propframes.bin", 32768, 32768
-.segment "PROPB2"
-  .incbin "../assets/propframes.bin", 65536, 32768
-.segment "PROPB3"
-  .incbin "../assets/propframes.bin", 98304
+; v1.8 (2 MB): chase jet frames, 16 x 64x64 per bank from $A0 (JS_N frames)
+.segment "JETB0"
+JetFrames:   .incbin "../assets/jetframes.bin", 0, 32768
+.segment "JETB1"
+  .incbin "../assets/jetframes.bin", 32768, 32768
+.segment "JETB2"
+  .incbin "../assets/jetframes.bin", 65536, 32768
+.segment "JETB3"
+  .incbin "../assets/jetframes.bin", 98304, 32768
+.segment "JETB4"
+  .incbin "../assets/jetframes.bin", 131072, 32768
+.segment "JETB5"
+  .incbin "../assets/jetframes.bin", 163840, 32768
+.segment "JETB6"
+  .incbin "../assets/jetframes.bin", 196608, 32768
+.segment "JETB7"
+  .incbin "../assets/jetframes.bin", 229376, 32768
+.segment "JETB8"
+  .incbin "../assets/jetframes.bin", 262144, 32768
+.segment "JETB9"
+  .incbin "../assets/jetframes.bin", 294912, JS_N*2048-9*32768
+; v1.8: streamed 32x32 slot frames, 64 per bank from $AA: enemies (3 banks x 64 yaws) then ground props (32 yaws)
+.segment "SLOTB0"
+SlotFrames:   .incbin "../assets/slotframes.bin", 0, 32768
+.segment "SLOTB1"
+  .incbin "../assets/slotframes.bin", 32768, 32768
+.segment "SLOTB2"
+  .incbin "../assets/slotframes.bin", 65536, 32768
+.segment "SLOTB3"
+  .incbin "../assets/slotframes.bin", 98304, 32768
+.segment "SLOTB4"
+  .incbin "../assets/slotframes.bin", 131072, 32768
+.segment "SLOTB5"
+  .incbin "../assets/slotframes.bin", 163840, 32768
+.segment "SLOTB6"
+  .incbin "../assets/slotframes.bin", 196608, 32768
+.segment "SLOTB7"
+  .incbin "../assets/slotframes.bin", 229376, 32768
+.segment "SLOTB8"
+  .incbin "../assets/slotframes.bin", 262144, 32768
+.segment "SLOTB9"
+  .incbin "../assets/slotframes.bin", 294912, SS_NFR*512-9*32768
 ; v1.2: prop offsets rotated for every heading (headings 0-127 in $94, 128-255 in $95)
 .segment "PROPB4"
 PropRot: .incbin "../assets/proprot.bin", 0, 128*NPROPS*2

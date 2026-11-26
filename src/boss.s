@@ -380,6 +380,7 @@ BsWarn:
   ldx #15
   ldy #150
   jsr SfxB
+  jsl X18_DadVoice           ; v1.8: his mouth follows the line
 : lda #1
   sta b_vis
   stz b_x
@@ -1794,8 +1795,7 @@ BossDraw:
 : jsr BossProj
   bcs :+
   rts
-: lda b_fb                   ; hit / dying shudder
-  ora b_st
+: jsl X18_Recoil             ; v1.8: hit / dying shudder (dad: a smooth recoil)
   and #$0004
   beq :+
   lda frame
@@ -1817,7 +1817,7 @@ BossDraw:
   lda frame
   and #2
   beq :+
-  lda #T_CHASE_BFLAME1
+  lda #T_CHASE_BFLAME0       ; v1.8: chase: one cell, 16 streamed flicker frames
   ldx view
   cpx #VIEW_COCK
   bne @f
@@ -2076,6 +2076,7 @@ BossColors:
   beq @robot
   ; v1.6 dad: pupils (13) dark, glowing red while he telegraphs / attacks, white when hit;
   ; lens glare (14) cool white, strobing red-white while he charges or fires the beam, white when hit
+  jsl X18_DadAnim            ; v1.8: blink, mouth, breath
   lda #$0C67
   sta b_ceye
   lda b_atk

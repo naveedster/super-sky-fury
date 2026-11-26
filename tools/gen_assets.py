@@ -468,7 +468,9 @@ def enemy_frames_persp(include_away=True, include_bank=True):
     f["EXXS"] = tiny(["ADDA", ".99."])
     return f
 
-import boom17
+import boom17, boom18
+BOOM18 = boom18.boom_seq(24); SMOKE18 = boom18.smoke_seq(12); FLAME18 = boom18.flame_seq(16); BFLAME18 = boom18.bflame_seq(16)
+FX_HOME_A, FX_HOME_B, FX_HOME_C = 3, 13, 2
 OLD_BOOM = bool(os.environ.get('OLD_BOOM'))
 def fx_frames(two_big=True, two_debris=True, extra=True):
     f = {}
@@ -476,12 +478,12 @@ def fx_frames(two_big=True, two_debris=True, extra=True):
         f["X32A"] = fireball(32, 10.5, 3, core=1.15)
         if two_big: f["X32B"] = fireball(32, 14.0, 9, smoke=0.22, core=0.9)
     else:                                     # v1.7: glossy ray-traced billows, shockwave ring, debris (tools/boom17.py)
-        f["X32A"] = boom17.fireball(32, 3, "A")
-        if two_big: f["X32B"] = boom17.fireball(32, 9, "B")
+        f["X32A"] = BOOM18[FX_HOME_A]          # v1.8: the sheet holds the streamed sequences' home frames
+        if two_big: f["X32B"] = BOOM18[FX_HOME_B]
     f["X16A"] = flash_star(16)
     f["X16B"] = smoke_puff(16, 6.2, 4, light=True) if OLD_BOOM else boom17.smoke16(4)
     if extra:
-        f["X16C"] = smoke_puff(16, 6.6, 12, embers=True) if OLD_BOOM else boom17.smoke16(12, True)
+        f["X16C"] = smoke_puff(16, 6.6, 12, embers=True) if OLD_BOOM else SMOKE18[FX_HOME_C]
         if extra != "nopuff": f["PUFF"] = puff_small()
     f["DEB0"] = TUMBLE_FR["DEB0"][0]          # v1.2: sprite-stacked, streamed tumbling frames (frame 0 here)
     if two_debris: f["DEB1"] = TUMBLE_FR["DEB1"][0]
@@ -610,17 +612,24 @@ jet_top0 = sh.a.copy()
 sh = Sheet()
 # v1.1 sprite stacking: the chase jet is ONE 64x64 VRAM slot; its 15 frames (5 bank x level/climb/dive)
 # live in ROM and the NMI streams the one in use (src/v11.s X_Stream)
-JET_ROLLS = (0, 11, 22, 33, 44); JET_NOSE = (0, 14, -14)
-jet_frames = [render_jet("chase", r, 64, 1.9, pitch_deg=38, nose=p) for p in JET_NOSE for r in JET_ROLLS]
-sh.put("JETS", jet_frames[0])
+# v1.8 smooth animation: 17 bank angles (-44..44 deg in 5.5 deg steps, no mirroring so the key light stays
+# put) x 5 nose pitches (-14, -7, 0, 7, 14), then a full 360 deg barrel roll in 64 steps (5.6 deg): 149 frames,
+# streamed one per vblank from banks $A0-$A9 (frame f: bank $A0 + f/16, offset (f & 15) * 2 KB)
+JET_BANKS = [5.5 * k for k in range(-8, 9)]; JET_NOSE = (-14, -7, 0, 7, 14)
+JET_NROLL = 64; JET_ROLL0 = len(JET_BANKS) * len(JET_NOSE)
+jet_frames = [render_jet("chase", r, 64, 1.9, pitch_deg=38, nose=p) for p in JET_NOSE for r in JET_BANKS]
+jet_frames += [render_jet("chase", a * 360.0 / JET_NROLL, 64, 1.9, pitch_deg=38) for a in range(JET_NROLL)]
+sh.put("JETS", jet_frames[2 * len(JET_BANKS) + 8])
 wingtips = []
 for jg in jet_frames:
     ys, xs = np.nonzero(jg > 1)
     li = xs.argmin(); ri = xs.argmax()
     wingtips.append((int(xs[li]), int(ys[li]), int(xs[ri]), int(ys[ri])))
 # streamed 32x32 slots: near enemies (9 unique yaws of 16, the rest h-flipped) and near ground props (16 yaws)
-EN_YAWS = [render_enemy("chase", 0, u * 22.5, 32, 1.02) for u in range(9)]
-for k in range(6): sh.put(f"SLOT{k}", EN_YAWS[8])
+# v1.8: 64 yaws x 3 bank angles (-30 / 0 / +30 deg while turning), no mirroring: frame = bank * 64 + yaw64
+EN_NYAW = 64; EN_BANKS = (-30, 0, 30)
+EN_YAWS = [render_enemy("chase", b, u * 360.0 / EN_NYAW, 32, 1.02) for b in EN_BANKS for u in range(EN_NYAW)]
+for k in range(6): sh.put(f"SLOT{k}", EN_YAWS[EN_NYAW + 32])
 for u in range(5): sh.put(f"EMY{u}", render_enemy("chase", 0, u * 45.0, 16, 0.50))
 # v1.2: per-stage ground props. Four slots per stage (0 open water / sand, 1 nature, 2 structure,
 # 3 military = shootable); each stage maps its slots to voxel models (STAGE_PROPS). Near: 16 streamed
@@ -635,7 +644,8 @@ SLOT_WATER = [(0, 2), (0,)]          # per map: slots that stand on water (map B
 def render_prop(t, yaw, size, scale, pc, outline=1):
     return vs.render(PROPS12[t], vs.PROP12_RAMPS, "chase", yaw=yaw, pitch_cam=pc, size=size, scale=scale * PROP12_SCALE.get(t, 1.4) / 1.4,
                      oy=size / 2 - 3, dither=size > 16, flat_top=0.18, outline=outline, gloss=GLOSS_PROP if size > 16 else {})
-PROP_NEAR = [[render_prop(t, d * 22.5, 32, 1.4, 30) for d in range(16)] for t in PROP12_LIST]
+PROP_NYAW = 32               # v1.8: 32 yaws (was 16)
+PROP_NEAR = [[render_prop(t, d * 360.0 / PROP_NYAW, 32, 1.4, 30) for d in range(PROP_NYAW)] for t in PROP12_LIST]
 PROP_MID = {t: (render_prop(t, 30, 16, 0.7, 22), render_prop(t, 30, 16, 0.36, 15, outline=0)) for t in PROP12_LIST}
 for i, t in enumerate(STAGE_PROPS[0]):
     sh.put(f"PRM{i}", PROP_MID[t][0]); sh.put(f"PRF{i}", PROP_MID[t][1])
@@ -649,7 +659,7 @@ for i, c in enumerate(clouds_small[:1]):
     sh.put(f"CLOUDT{i}", t.astype(np.uint8))
 # chase view runs OBSEL 16x16/64x64: dots + flames are 16x16 (flame content shifted 8 px left)
 for i, p in enumerate((1, 2, 3)): sh.put(f"DOT{i}", dot(32, p)[:16, :16])
-sh.put("FLAME0", flame(32, 12, 0, "chase")[:16, 8:24]); sh.put("FLAME1", flame(32, 12, 1, "chase")[:16, 8:24])
+sh.put("FLAME0", FLAME18[0]); sh.put("FLAME1", FLAME18[8])   # v1.8: FLAME0 streams 16 frames
 for k, g in enemy_frames_persp(include_away=False, include_bank=False).items():
     if k != "EM": sh.put(k, g)            # (chase medium enemies are the 8-direction EMY frames)
 for k, g in fx_frames().items(): sh.put(k, g)
@@ -674,9 +684,15 @@ def tile_rows(g, tw):
             out += to4bpp(g[ty * 8:ty * 8 + 8, tx * 8:tx * 8 + 8])
     return bytes(out)
 open(f"{OUT}/jetframes.bin", "wb").write(b"".join(tile_rows(j, 8) for j in jet_frames))
-SLOT_FRAMES = EN_YAWS
-open(f"{OUT}/slotframes.bin", "wb").write(b"".join(tile_rows(f, 4) for f in SLOT_FRAMES))
-open(f"{OUT}/propframes.bin", "wb").write(b"".join(tile_rows(f, 4) for fr in PROP_NEAR for f in fr))
+SS_PR_N = 64 * ((len(EN_YAWS) + 63) // 64)       # prop frames start on a bank boundary
+SLOT_FRAMES = EN_YAWS + [np.zeros((32, 32), np.uint8)] * (SS_PR_N - len(EN_YAWS)) + [f for fr in PROP_NEAR for f in fr]
+open(f"{OUT}/slotframes.bin", "wb").write(b"".join(tile_rows(f, 4) for f in SLOT_FRAMES))   # 64 frames per bank
+# v1.8: medium-range enemies stream too: the same 64 yaws x 3 banks at 16x16 (128 B each, one bank)
+EN_MED = [render_enemy("chase", b, u * 360.0 / EN_NYAW, 16, 0.50) for b in EN_BANKS for u in range(EN_NYAW)]
+open(f"{OUT}/medframes.bin", "wb").write(b"".join(tile_rows(f, 2) for f in EN_MED))
+# v1.8: explosion (24 x 32x32), dying smoke (12 x 16x16), afterburner (16 x 16x16) sequences
+open(f"{OUT}/fxframes.bin", "wb").write(b"".join(tile_rows(f, 4) for f in BOOM18) + b"".join(tile_rows(f, 2) for f in SMOKE18)
+                                        + b"".join(tile_rows(f, 2) for f in FLAME18) + b"".join(tile_rows(f, 2) for f in BFLAME18))
 def place_bases(info, seed, mi, nbase=9, nwater=3):
     """ground props for one Mode 7 map, grouped in bases (so the game culls a whole base at once):
     the airfield, every town, open land, then open water (carriers / rigs, pyramids, icebergs).
@@ -711,7 +727,12 @@ PROP_MAPS = [place_bases(terrain.INFO[""], 5, 0), place_bases(terrain.INFO["B"],
 print("ground prop bases:", [len(m) for m in PROP_MAPS], "props:", [sum(len(b[2]) for b in m) for m in PROP_MAPS])
 with open(f"{OUT}/stack.inc", "w") as fo:
     fo.write("; generated by tools/gen_assets.py (v1.1 sprite stacking)\n")
-    fo.write(f"JS_N = {len(jet_frames)}\nSS_EN = 0\nSS_PR = {len(EN_YAWS)}\nNBASE = {len(max(PROP_MAPS, key=len))}\n")
+    def _rows(j):
+        r = [ty for ty in range(8) if j[ty * 8:ty * 8 + 8].any()] or [0]
+        return min(r) | max(r) << 4
+    fo.write("JetRows: .byte " + ",".join(str(_rows(j)) for j in jet_frames) + "   ; v1.8: first | last non-empty tile row << 4\n")
+    fo.write(f"JS_N = {len(jet_frames)}\nJS_NB = {len(JET_BANKS)}\nJS_ROLL0 = {JET_ROLL0}\nJS_NROLL = {JET_NROLL}\n")
+    fo.write(f"EN_NYAW = {EN_NYAW}\nSS_EN = 0\nSS_PR = {SS_PR_N}\nSS_NFR = {len(SLOT_FRAMES)}\nNBASE = {len(max(PROP_MAPS, key=len))}\n")
     fo.write("WingTips:  ; per jet frame: LX LY RX RY\n")
     for w in wingtips: fo.write("  .word " + ", ".join(str(v) for v in w) + "\n")
     k = 0; props = []
@@ -723,8 +744,8 @@ with open(f"{OUT}/stack.inc", "w") as fo:
     fo.write("PropOff:  ; dx, dy (from the base centre), type, yaw (16ths)\n")
     for ox, oy, t, yw in props: fo.write(f"  .word {ox & 0xFFFF}, {oy & 0xFFFF}, {t}, {yw}\n")
     fo.write(f"NPROP12 = {len(PROP12_LIST)}\nNPROPS = {len(props)}\n")
-    fo.write("StageMod:  ; per stage, per slot: first near frame id (SS_PR + model * 16)\n")
-    for sp in STAGE_PROPS: fo.write("  .word " + ", ".join(str(len(EN_YAWS) + PROP12_LIST.index(t) * 16) for t in sp) + "\n")
+    fo.write("StageMod:  ; per stage, per slot: first near frame id (SS_PR + model * 32)\n")
+    for sp in STAGE_PROPS: fo.write("  .word " + ", ".join(str(SS_PR_N + PROP12_LIST.index(t) * PROP_NYAW) for t in sp) + "\n")
 # v1.2: prop offsets pre-rotated for all 256 headings (replaces four 8-bit multiplies per prop):
 # per heading, per prop: dz = PMul(ox, S) - PMul(oy, C), dx = PMul(ox, C) + PMul(oy, S) as signed bytes
 def _pmul(a, t): return (1 if a * t >= 0 else -1) * ((abs(a) * abs(t)) >> 8)
@@ -873,7 +894,7 @@ def boss_sheet(view, field, drop):
                 nm = f"BC{len(uniq)}"; uniq[k] = nm; b.put(nm, t); refs[(n, i)] = (nm, 0)
     b.put("BORB0", boss_art.beam_orb(True)); b.put("BORB1", boss_art.beam_orb(False))
     b.put("BSHARD", TUMBLE_FR["BSHARD"][0])
-    b.put("BFLAME0", boss_art.flame16(0)); b.put("BFLAME1", boss_art.flame16(1))
+    b.put("BFLAME0", BFLAME18[0] if view == "chase" else boss_art.flame16(0)); b.put("BFLAME1", boss_art.flame16(1))
     print(f"boss sheet {view}: {len(uniq)} boss cells, room", int((~b.used).sum()), "tiles before packing")
     free = b.pack(); print(f"boss sheet {view}: {free} tiles free, {len(uniq)} boss cells")
     data = b.bin(); old = field.bin()
@@ -929,7 +950,51 @@ def _dad_cells(px):
             c = np.zeros((16, 16), np.uint8); blk = px[y:y + 16, x:x + 16]; c[:blk.shape[0], :blk.shape[1]] = blk
             if (c > 0).sum() > 6: out.append((x - gx, y - gy, c, 0))
     return out
-DAD_PARTS = {"dad": _dad_cells(DAD_PX), "dad_dmg": _dad_cells(_dad_dmg(DAD_PX))}
+# v1.8: head / chest split (the chest breathes under the head), blink + talking mouth tile patches
+DAD_SPLIT = 112 - DAD_GL[1]                             # cell rows from y = 112 down are the chest
+_DAD_PUP = ((48.5, 54.0), (73.0, 54.0))                 # pupils (output px)
+_DAD_MOUTH = (61.0, 82.0)
+def _dad_eyes(px, st):
+    """st 0 open, 1 half shut, 2 shut (lids: skin, lash line)"""
+    q = px.copy()
+    if st == 0: return q
+    for cx, cy in _DAD_PUP:
+        for y in range(int(cy) - 4, int(cy) + 4):
+            for x in range(int(cx) - 6, int(cx) + 7):
+                e = ((x + 0.5 - cx) / 5.6) ** 2 + ((y + 0.5 - cy) / 3.0) ** 2
+                if e >= 1 or q[y, x] in (0, 1, 11, 14): continue
+                if st == 2:
+                    if abs(y + 0.5 - (cy + 0.9)) < 0.6: q[y, x] = 15          # lash line
+                    elif y + 0.5 < cy + 0.9: q[y, x] = 7 if y + 0.5 < cy - 1.2 else 6
+                    else: q[y, x] = 6 if y + 0.5 < cy + 2.2 else q[y, x]
+                else:
+                    if y + 0.5 < cy - 0.3: q[y, x] = 6
+                    elif abs(y + 0.5 - (cy - 0.3)) < 0.8: q[y, x] = 15
+    return q
+def _dad_mouth(px, lv):
+    """lv 0 closed .. 3 wide: the lower lip and beard drop, a dark mouth opens (teeth at 2+), lower lip lit"""
+    q = px.copy()
+    if lv == 0: return q
+    mx, my = _DAD_MOUTH; w = 3.6 + lv * 1.1; H = (0, 2, 3, 5)[lv]
+    for x in range(int(mx - 10), int(mx + 11)):
+        dxa = abs(x + 0.5 - mx)
+        f = max(0.0, 1 - (dxa / (w + 3.5)) ** 2)
+        k = int(round(H * f))
+        if k <= 0: continue
+        for y in range(95, int(my) - 1 + k, -1):                         # drop the jaw (cell row ends at 95)
+            q[y, x] = px[y - k, x]
+        for y in range(int(my), int(my) + k):
+            if dxa <= w:
+                if lv >= 2 and y == int(my) and dxa < w * 0.6: q[y, x] = 11        # upper teeth
+                else: q[y, x] = 1 if dxa < w - 1 and y > int(my) - 1 else 15
+        if dxa <= w - 0.5 and q[int(my) + k, x] > 1: q[int(my) + k, x] = 7        # lower lip
+    return q
+def _dad_parts(px, sfx):
+    cells = _dad_cells(px)
+    return {"dad" + sfx: [c for c in cells if c[1] < DAD_SPLIT], "dadb" + sfx: [c for c in cells if c[1] >= DAD_SPLIT]}
+DAD_PARTS = {}
+DAD_PARTS.update(_dad_parts(DAD_PX, "")); DAD_PARTS.update(_dad_parts(_dad_dmg(DAD_PX), "_dmg"))
+DAD_PARTS = {k: DAD_PARTS[k] for k in ("dad", "dad_dmg", "dadb", "dadb_dmg")}
 _b, _rows, _used, _tabs = boss_out["chase"]
 _d = copy.deepcopy(_b)
 _d.free([k for k in list(_d.syms) if k.startswith("BC")])
@@ -944,20 +1009,66 @@ for _n, _lst in DAD_PARTS.items():
         tile = _d.syms[nm]; attr = 0x0E | (tile >> 8 & 1) | (0x40 if ff else 0)
         _ent.append((dx, dy, (tile & 0xFF) | attr << 8))
     _tabs[_n] = _ent
+# v1.8 patch groups: every tile whose 16x16 cell changes in some eye / mouth state, the cell data per state
+def _dad_group(fn, nst):
+    out = {}
+    for sfx in ("", "_dmg"):
+        b0 = DAD_PX if not sfx else _dad_dmg(DAD_PX)
+        ents = {(dx, dy): w for n in ("dad" + sfx, "dadb" + sfx) for dx, dy, w in _tabs[n]}
+        vs = [fn(DAD_PX, st) if not sfx else _dad_dmg(fn(DAD_PX, st)) for st in range(nst)]
+        gx, gy = DAD_GL
+        for cy in range(0, b0.shape[0], 16):
+            for cx in range(0, b0.shape[1], 16):
+                blk = [v[cy:cy + 16, cx:cx + 16] for v in vs]
+                if all(np.array_equal(blk[0], bk) for bk in blk[1:]) and np.array_equal(blk[0], b0[cy:cy + 16, cx:cx + 16]): continue
+                w = ents[(cx - gx, cy - gy)]
+                tile = (w & 0xFF) | ((w >> 8) & 1) << 8; ff = (w >> 8) & 0x40
+                data = [np.ascontiguousarray(bk[:, ::-1]) if ff else bk for bk in blk]
+                if tile in out: assert all(np.array_equal(a, b) for a, b in zip(out[tile], data)), "shared patch tile"
+                out[tile] = data
+    # a patched tile must not be drawn anywhere else
+    uses = {}
+    for n in DAD_PARTS:
+        for dx, dy, w in _tabs[n]: uses.setdefault((w & 0xFF) | ((w >> 8) & 1) << 8, set()).add((n.replace("_dmg", ""), dx, dy))
+    for t in out: assert len({u[1:] for u in uses[t]}) == 1, f"dad patch tile {t} is shared"
+    return sorted(out.items())
+DAD_EYE = _dad_group(_dad_eyes, 3); DAD_MOUTH = _dad_group(_dad_mouth, 4)
+print("dad patches: eye tiles", [t for t, _ in DAD_EYE], "mouth tiles", [t for t, _ in DAD_MOUTH])
+with open(f"{OUT}/dadpatch.bin", "wb") as fo:
+    for grp, nst in ((DAD_EYE, 3), (DAD_MOUTH, 4)):
+        for st in range(nst):
+            for t, data in grp: fo.write(tile_rows(data[st], 2))
+import wave as _wave
+_w = _wave.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "music", "dad_voice.wav"))
+_vx = np.frombuffer(_w.readframes(_w.getnframes()), np.int16).astype(np.float32) / 32768; _vsr = _w.getframerate()
+_hop = _vsr / 60.0; _env = []
+for i in range(int(len(_vx) / _hop) + 1):
+    seg = _vx[int(i * _hop):int((i + 1) * _hop)]
+    _env.append(float(np.sqrt((seg ** 2).mean())) if len(seg) else 0.0)
+_env = np.array(_env); _env /= max(1e-6, np.percentile(_env, 95))
+_lv = []; _sm = 0.0
+for e in _env:                                          # fast open, slower close; 0..3
+    _sm = e if e > _sm else _sm * 0.72 + e * 0.28
+    _lv.append(0 if _sm < 0.18 else 1 if _sm < 0.42 else 2 if _sm < 0.7 else 3)
+DAD_TALK = [0, 0] + _lv + [0]                 # (2 frames for the APU to start the sample)
 _dd = _d.bin(); _old = chase_sheet.bin()
 open(f"{OUT}/obj_chase_dad.bin", "wb").write(_dd)
 _rows_d = [ty for ty in range(32) if _dd[ty * 512:(ty + 1) * 512] != _old[ty * 512:(ty + 1) * 512]]
 _rows = sorted(set(_rows) | set(_rows_d))
-boss_out["chase"] = (_b, _rows, _used + ["dad", "dad_dmg"], _tabs)
+boss_out["chase"] = (_b, _rows, _used + ["dad", "dad_dmg", "dadb", "dadb_dmg"], _tabs)
 _cb, _crows, _cused, _ctabs = boss_out["cock"]
-boss_out["cock"] = (_cb, _crows, _cused + ["body", "body"], _ctabs)
-BV_IDS += ["dad", "dad_dmg"]
+boss_out["cock"] = (_cb, _crows, _cused + ["body", "body", "body", "body"], _ctabs)
+BV_IDS += ["dad", "dad_dmg", "dadb", "dadb_dmg"]
 print(f"dad sheet: {len(_uq)} cells, {int((~_d.used).sum())} tiles free, {len(DAD_PARTS['dad'])} sprites; rows {len(_rows)}")
 dad_art.preview(DAD_PX, f"{OUT}/dad_boss.png", 2)
 with open(f"{OUT}/boss.inc", "w") as fo:
     fo.write("; generated by tools/gen_assets.py (boss v1.2)\n")
     fr_ = BV["chase"][0]
     fo.write(f"BOSS_EYE_DY = {fr_['_eye_dy']}\n")
+    fo.write(f"DP_EYE_N = {len(DAD_EYE)}\nDP_MOUTH_N = {len(DAD_MOUTH)}\nDP_TALK_N = {len(DAD_TALK)}\n")
+    fo.write("DpEyeTile: .word " + ", ".join(str(t) for t, _ in DAD_EYE) + "\n")
+    fo.write("DpMouthTile: .word " + ", ".join(str(t) for t, _ in DAD_MOUTH) + "\n")
+    fo.write("DadTalk: .byte " + ", ".join(str(v) for v in DAD_TALK) + "\n")
     for view in ("chase", "cock"):
         f2 = BV[view][0]
         fo.write(f"BOSS_FOOT_X_{view.upper()} = {f2['_foot'][0]}\nBOSS_FOOT_Y_{view.upper()} = {f2['_foot'][1]}\n")

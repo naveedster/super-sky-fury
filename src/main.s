@@ -223,6 +223,7 @@ loops:     .res 2
 maxline:   .res 2
 noprof:    .res 2
 nmi_ln:    .res 2
+ld_last:   .res 2
 st_ln:     .res 2
 st_nmi:    .res 2
 wc_dur:    .res 2
@@ -596,6 +597,7 @@ Profile:
   dec noprof
   rts
 : jsr LoadNow
+  sta ld_last                ; (perf: this frame's load in scanlines)
 .ifdef RING
   pha
   lda loops
@@ -3133,13 +3135,8 @@ BuildChase:
   lda #150
   sta sy
   stz sbig
-  lda frame
-  and #2
-  beq :+
-  lda #T_CHASE_FLAME1
-  bra :++
-: lda #T_CHASE_FLAME0
-: sta stile
+  lda #T_CHASE_FLAME0         ; v1.8: streamed 16-frame flicker (X18_FxStream)
+  sta stile
   lda #$32
   sta sattr
   jsr PutSpr
@@ -3230,9 +3227,7 @@ CtFull:
   asl
   asl
   tax                       ; 8 bytes per frame entry: LX LY RX RY
-  lda turnrate
-  bmi @flip
-  lda f:WingTips,x
+  lda f:WingTips,x            ; v1.8: every bank / roll frame is rendered (no mirroring)
   sta t0
   lda f:WingTips+2,x
   sta t1
@@ -4240,6 +4235,7 @@ TrailCommon:
 .include "v11.s"
 .include "v14.s"
 .include "v17.s"
+.include "v18.s"
 .include "../music/build/apu_upload.inc"
 
 ; =====================================================================
@@ -4302,11 +4298,11 @@ MapCock:  .incbin "../assets/map_cock.bin"
 .include "../assets/romname.inc"  ; "SUPER SKY FURY" padded to 21 (tools/title_art.py)
   .byte $30                       ; LoROM, FastROM
   .byte $00                       ; ROM only
-  .byte $0A                       ; 1 MB (v1.2: ground prop frames in banks $90-$93)
+  .byte $0B                       ; 2 MB (v1.8: animation frames in banks $A0-$BF)
   .byte $00                       ; no SRAM
   .byte $01                       ; North America
   .byte $00                       ; developer
-  .byte $07                       ; version (v1.7)
+  .byte $08                       ; version (v1.8)
   .word $FFFF                     ; checksum complement (fixed by build)
   .word $0000                     ; checksum
 

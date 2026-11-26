@@ -60,7 +60,7 @@ SNES emulator.
   | NORMAL | 5 | standard | standard |
   | HARD | 3 | higher | faster |
 
-* Runs at a steady **60 fps** on a stock console: 1 MB LoROM/FastROM, no enhancement chip,
+* Runs at a steady **60 fps** on a stock console: 2 MB LoROM/FastROM, no enhancement chip,
   NTSC.
 
 | Menu | Options | Credits |
@@ -142,6 +142,25 @@ For the full test methodology and the hardware-safety rules the code follows, se
 [docs/TECHNICAL.md](docs/TECHNICAL.md).
 
 ## Changelog
+
+### v1.8 (2026-11-25): Smooth sprite animation
+
+![v1.7 vs v1.8](docs/screenshots/before_after_v1_8.png)
+
+* **Your jet** now has 149 frames instead of 15 mirrored ones: 17 bank angles x 5 climb/dive poses, eased in and
+  out so it rolls into a turn instead of snapping, plus a 64-step barrel roll. The new frame streams into VRAM by
+  DMA during vblank, and only the tile rows that change are sent.
+* **Enemies** turn smoothly: 64 headings x 3 bank poses (192 frames, up from 16 headings), and they lean into
+  their turns. The same frames are used at mid range at 16x16 (up from 8 directions). Ground targets have
+  32 headings, up from 16.
+* **Explosions** play one continuous 40-frame sequence: a flash, 24 fireball frames and 12 smoke frames, with no
+  mirrored-frame flicker. The **afterburner** and the **boss thrusters** have 16 frames each, up from 2.
+* **Dad** blinks, his mouth moves with his voice line (driven by the loudness of the recording), his chest rises
+  and falls as he breathes, and he flinches and settles after a hit instead of jumping 1 frame. The Stage 4
+  **robot** also recoils smoothly, and its arm kick eases in and out.
+* **No new slowdown.** v1.7 and v1.8 ran the same 5 bot scenarios 120 times each. v1.8 dropped fewer frames
+  overall: 4504 vs 4860. See TECHNICAL.md. On a heavy frame, streaming waits up to 3 vblanks and then catches up.
+* The ROM is now 2 MB (LoROM, FastROM) and still needs no enhancement chip.
 
 ### v1.7 (2026-11-25): Medals, set pieces, checkpoints, new explosions
 

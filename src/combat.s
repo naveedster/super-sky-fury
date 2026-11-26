@@ -705,6 +705,7 @@ MoveEnemies:
   jsr MulB
   sta t1                    ; weave (angle units)
   ldx c_i
+  sta en_wv,x               ; v1.8: the near frame turns and banks with the weave
   lda en_hd,x
   xba
   and #$00FF
@@ -1566,43 +1567,7 @@ ProjectObjects:
 : lda #F_EXXS
   bra @add
 @boom:
-  lda en_t,x
-  lsr
-  lsr
-  and #1
-  beq :+
-  lda #$40
-: ora obj_pri
-  sta o_a
-  lda en_t,x
-  cmp #4
-  bcc @x16a
-  cmp #28
-  bcs @smoke
-  lda en_ty,x
-  cmp #T_BIGBOOM
-  beq :+
-  lda t1
-  cmp #170
-  bcs @x16a
-: lda en_t,x
-  lda en_t,x
-  cmp #12
-  bcs :+
-  lda #F_X32A
-  bra @add
-: lda #F_X32B
-  bra @add
-@x16a:
-  lda #F_X16A
-  bra @add
-@smoke:
-  lda en_t,x
-  cmp #38
-  bcs :+
-  lda #F_X16C               ; fire dying into smoke, embers
-  bra @add
-: lda #F_X16B
+  jsl X18_Boom               ; v1.8: one continuous streamed explosion sequence (no flip flicker)
 @add:
   jsr AddObj
 @en0:

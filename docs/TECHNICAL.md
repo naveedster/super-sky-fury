@@ -9,6 +9,70 @@ that name. The public overview is in the [README](../README.md).
 > They are excluded by `.gitignore` and are not in the repository. The release ROM is
 > `dist/super_sky_fury.sfc`. Current music renders are `music/{title,stage,boss,boss_victory}.{mp3,spc}`.
 
+## v1.8: smooth sprite animation (stock SNES, no enhancement chip)
+
+The ROM grows from 1 MB to 2 MB: LoROM, FastROM (header map byte `$30`, size byte `$0B`), banks `$80-$BF`. That
+gives 64 x 32 KB banks. New banks: `JETB0-9` (`$A0-$A9`, jet frames), `SLOTB0-9` (`$AA-$B3`, near enemy and
+prop frames), `ANIMB0` (mid-range enemy frames), `ANIMB1` (explosion, afterburner and thruster frames) and
+`ANIMB2` (dad face patches). `ANIMB3-11` are reserved and empty; ld65 warns that those segments do not exist,
+which is harmless. The new code is in `src/v18.s`, and the frames come from `tools/gen_assets.py` and
+`tools/boom18.py`.
+
+| Sprite | v1.7 | v1.8 |
+|---|---|---|
+| Chase jet | 15 (mirrored) | 149: 17 banks x 5 climb/dive + 64 barrel-roll angles |
+| Near enemies | 16 headings (9 unique) | 192: 64 headings x 3 bank poses |
+| Mid-range enemies | 8 directions (5 + flips) | the same 192 at 16x16, streamed into 5 cells |
+| Ground targets (near) | 16 headings | 32 headings |
+| Enemy explosion | 2 big + 2 smoke frames with flip flicker | flash + 24 fireball + 12 smoke, one sequence |
+| Afterburner / boss thrusters | 2 / 2 | 16 / 16 (new frame every 2 vblanks) |
+| Dad | static face | 3 eye states (blink), 4 mouth states synced to the voice, 1 px breath, damped recoil |
+| Robot | 1-frame shudder, fixed 3 px arm kick | damped recoil, eased arm kick |
+
+* **Streaming.** Everything goes through the chase-view NMI (`X_Stream` in `v11.s`, then `X18_MedStream` and
+  `X18_FxStream`). Each step checks `SS_Line` (the scanline count into vblank, with about 37 lines available) and stops
+  early when vblank is nearly over. DMA can move about 6.1 KB per vblank at 224 lines, and the budget stays well under that. The jet sends only the union of the old and new frame's non-empty tile rows (`JetRows`, at most 8 x
+  256 B). Mid-range cells are 2 x 64 B. Fireball cells are 512 B and take turns with each other, one cell per
+  vblank. Smoke cells are 128 B and the flames 2 x 64 B.
+* **Budgeted, adaptive.** `ld_last` (the last frame's load in scanlines, set in `Profile`) above `LAG_LN` (185)
+  marks a heavy frame. Then the jet, mid-range and explosion uploads wait, for at most `JWAIT` (3) or `CWAIT` (2)
+  vblanks in a row, before catching up. The cells skip a vblank when the jet uploaded in it (`js_upd`). An idle path (`fx_ok`,
+  `ms_dt`) skips the cell loops when nothing has been requested. An explosion request is held for 16 frames, then the
+  cell returns to its home frame (the frame that the static sheets and the cockpit and overhead views show).
+* **Easing.** Jet bank level has hysteresis (a one-step change needs the turn rate `$20` past the threshold), and
+  the climb pose eases 1 step per frame. Each enemy's bank pose comes from its smoothed world-heading change,
+  `bank += (rate - bank) / 4`, with thresholds at +-`$A0`. The headings include the weave offset `en_wv`.
+* **Dad.** His body is split into two parts at the chest so the lower part can breathe 1 px (64 of every 192
+  frames). The eyes and mouth are 16x16 patches cut from the finished `dad_px.png` sprite (`_dad_eyes`,
+  `_dad_mouth`), and they are DMAed over his face tiles when the state changes. The mouth level comes from the RMS of
+  `music/dad_voice.wav` at 60 Hz, quantized to 0-3 (`DadTalk`) and started on the voice SFX. Blinks come every
+  150-277 frames. He grimaces and squints under heavy damage. Recoil (`X18_Recoil`, used by both bosses) is a
+  damped offset from the hit timer instead of a 1-frame jump. The photo files `tools/dad/dad_ref.jpg` and
+  `dad_cut.png` stay gitignored.
+
+**Frame drops vs v1.7** (snes9x, SKIPTITLE scenario builds, `progress/v18/seeds.sh`: bot runs from 120 start
+offsets, frames 300-2100, or 300-2700 for s1; a dropped frame is an NMI without a finished main loop):
+
+| Scenario | v1.7 drops | v1.8 drops | v1.7 load | v1.8 load |
+|---|---|---|---|---|
+| Stage 1 from start (s1) | 1316 | 1149 | 186.5 | 188.2 |
+| Stage 1 warp (w0) | 2088 | 1847 | 194.7 | 195.5 |
+| Stage 2 (w1) | 299 | 293 | 191.1 | 190.9 |
+| Stage 3 (w2) | 108 | 108 | 200.2 | 200.8 |
+| Stage 4 (w3) | 1049 | 1107 | 184.7 | 186.8 |
+| **Total (600 runs)** | **4860** | **4504** | | |
+
+The 12-offset `perfm12.sh` run, which also covers the boss and view scenarios, gives v1.7 437 vs v1.8 388 in total.
+Dad fight (autopilot): 0 vs 0. Robot: 12 vs 12. Cockpit: 22 vs 9. Overhead: 2 vs 2. Drop counts are chaotic run to
+run (one extra drop changes the whole timeline), which is why many offsets are summed. Stage 4 is the only
+scenario where v1.8 is above v1.7, by +5.5%, which is within the run-to-run spread of these sums (about +-75). Load is in scanlines per frame, NMI included. It is about 1 line higher
+because of the streaming.
+
+Tested by playing from the title into the game with the bot on snes9x (current), the Delta snes9x 1.55 core and
+Mesen-S: all three reach the dad fight with matching state. bsnes runs the ROM, but its peek readout is empty in
+this harness, as in earlier versions. Audio: the dad voice starts at the same time as in v1.7 (6.11 s into the
+warp test), the music still ducks under it, and stereo width and RMS match v1.7.
+
 ## v1.7: medals, set pieces, checkpoints, explosions, voice ducking
 
 * **Voice ducking (SPC700, `music/make_music.py`):** SFX stream opcode `$7F` (never a valid step byte: step
@@ -1230,10 +1294,12 @@ make sure you're launching the new import, not the earlier no-music `snesfly.sfc
     src/snes.inc        register definitions + macros
     src/boss.s          boss v1: the giant robot boss (see "Boss v1")
     src/v17.s           v1.7: medals, stage events (convoy / storms / flak), checkpoints + continue
-    src/lorom.cfg       linker config (LoROM, 16 x 32 KB banks since boss v1)
+    src/v18.s           v1.8: animation streaming (jet, enemy, explosion, flame cells), dad face, recoil
+    src/lorom.cfg       linker config (LoROM FastROM, 64 x 32 KB banks = 2 MB since v1.8)
     tools/terrain.py    graphics v1: Mode 7 ground generator (terrain, towns, roads, airfield, tiles)
     tools/gen_assets.py procedural art, palettes, perspective/sin tables, HDMA tables
     tools/boom17.py     v1.7: ray-traced glossy explosion / smoke frames used by gen_assets.py
+    tools/boom18.py     v1.8: 40-frame explosion sequence, 16-frame afterburner and boss thruster frames
     tools/fixchecksum.py
     tools/lrharness.c   headless libretro test harness
     assets/             generated binaries (+ preview_map.png, sheet_*.png)
